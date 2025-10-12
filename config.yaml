@@ -1,0 +1,7 @@
+modifier: 'Mod1'
+
+actions:
+  - command: "xterm"
+    key: "return"
+  - command: "google-chrome"
+    key: "b"

@@ -3,4 +3,4 @@ cargo build
 
 set -e 
 
-xinit ./xinitrc -- $(command -v Xephyr) :1 -screen 1024x768
+xinit ./xinitrc -- $(command -v Xephyr) :2 -screen 1920x1080
