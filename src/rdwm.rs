@@ -1,8 +1,8 @@
 use std::process::Command;
 use xcb::{
-    x::{self, Cw, EventMask, Screen, Window}, Connection, ProtocolError, VoidCookie, Xid, XidNew
+    x::{self, Cw, EventMask , Window, ModMask}, Connection, ProtocolError
 };
-use saphyr::{LoadableYamlNode, Yaml};
+use crate::config::ACTION_MAPPINGS;
 
 pub struct WindowManager{
     conn: Connection,
@@ -11,12 +11,7 @@ pub struct WindowManager{
 
 impl WindowManager {
     pub fn new() -> Self {
-        let conf_str = std::fs::read_to_string("config.yaml").expect("Failed to read config.yaml");
-        let config = Yaml::load_from_str(&conf_str).unwrap();
-        println!("Config loaded: {:?}", config);
-        panic!("Testing config load");
-        let (conn, screen_num) = Connection::connect(None).unwrap();
-        println!("Connected to X.");
+        let (conn, _) = Connection::connect(None).unwrap();
         WindowManager {
             conn,
             windows: vec![],
@@ -107,6 +102,49 @@ impl WindowManager {
             
     }
 
+    fn set_substructure_redirect(&self, root: Window) -> Result<(), ProtocolError> {
+        let values = [Cw::EventMask(
+            EventMask::SUBSTRUCTURE_REDIRECT
+                | EventMask::SUBSTRUCTURE_NOTIFY
+                | EventMask::KEY_PRESS,
+        )];
+        self.conn.send_and_check_request(&x::ChangeWindowAttributes {
+            window: root,
+            value_list: &values,
+        })
+    }
+
+    // fn set_keybindings(&self, root: Window) {
+    //     for mapping in ACTION_MAPPINGS {
+    //         let keycode = xcb::x::Keysym::fr(&self.conn, mapping.key);
+    //         let modifiers = mapping.modifiers.iter().fold(xcb::x::ModMask::empty(), |acc, &modkey| {
+    //             acc | match modkey {
+    //                 "Shift" => xcb::x::ModMask::SHIFT,
+    //                 "Lock" => xcb::x::ModMask::LOCK,
+    //                 "Control" => xcb::x::ModMask::CONTROL,
+    //                 "Mod1" => xcb::x::ModMask::N1,
+    //                 "Mod2" => xcb::x::ModMask::N2,
+    //                 "Mod3" => xcb::x::ModMask::N3,
+    //                 "Mod4" => xcb::x::ModMask::N4,
+    //                 "Mod5" => xcb::x::ModMask::N5,
+    //             }
+    //         });
+
+    //         if let Some(kc) = keycode {
+    //             self.conn.send_and_check_request(&x::GrabKey {
+    //                 owner_events: false,
+    //                 grab_window: root,
+    //                 modifiers,
+    //                 key: kc,
+    //                 pointer_mode: xcb::x::GrabMode::Async,
+    //                 keyboard_mode: xcb::x::GrabMode::Async,
+    //             }).expect("Failed to grab key");
+    //         } else {
+    //             println!("Warning: No keycode found for keysym '{}'", mapping.key);
+    //         }
+    //     }
+    // }
+
 
     pub fn run(&mut self) -> xcb::Result<()> {
 
@@ -117,20 +155,11 @@ impl WindowManager {
         let screen_width = root.width_in_pixels() as u32;
         let screen_height = root.height_in_pixels() as u32;
 
-        let values = [Cw::EventMask(
-            EventMask::SUBSTRUCTURE_REDIRECT
-                | EventMask::SUBSTRUCTURE_NOTIFY
-                | EventMask::KEY_PRESS,
-        )];
-
-        match self
-            .conn
-            .send_and_check_request(&x::ChangeWindowAttributes {
-                window: root.root(),
-                value_list: &values,
-            }) {
+        match self.set_substructure_redirect(root.root()) {
             Ok(_) => println!("Succesfully set substructure redirect"),
-            Err(e) => println!("Cannot set attributes: {:?}", e),
+            Err(e) => {
+                println!("Cannot set attributes: {:?}", e);
+            }
         }
 
         loop {

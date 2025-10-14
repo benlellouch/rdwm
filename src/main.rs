@@ -1,4 +1,6 @@
 mod rdwm;
+mod config;
+mod key_mapping;
 
 fn main() {
     let mut wm = rdwm::WindowManager::new();
