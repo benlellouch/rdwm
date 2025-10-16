@@ -1,5 +1,7 @@
+use xcb::x::ModMask;
+use xkbcommon::xkb::Keysym;
 pub struct ActionMapping {
-    pub key: &'static str,
-    pub modifiers: &'static [&'static str],
+    pub key: Keysym,
+    pub modifiers: &'static [ModMask],
     pub action: &'static str,
 }

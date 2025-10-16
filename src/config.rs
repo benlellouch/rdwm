@@ -1,14 +1,16 @@
 use crate::key_mapping::ActionMapping;
+use xcb::x::ModMask;
+use xkbcommon::xkb;
 
 pub static ACTION_MAPPINGS: &[ActionMapping] = &[
     ActionMapping {
-        key: "Return",
-        modifiers: &["Mod4"],
-        action: "xterm",
+        key: xkb::Keysym::Return,
+        modifiers: &[ModMask::SHIFT],
+        action: "st",
     },
     ActionMapping {
-        key: "d",
-        modifiers: &["Mod4"],
-        action: "xeyes",
+        key: xkb::Keysym::d,
+        modifiers: &[ModMask::SHIFT],
+        action: "xclock",
     },
 ];
