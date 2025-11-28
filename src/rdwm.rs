@@ -11,6 +11,8 @@ pub struct WindowManager {
     conn: Connection,
     windows: Vec<Window>,
     key_bindings: HashMap<(u8, ModMask), ActionEvent>,
+    screen_width: u32,
+    screen_height: u32,
 }
 
 impl WindowManager {
@@ -32,10 +34,13 @@ impl WindowManager {
             (vec![], 0)
         };
 
+
         let mut wm = WindowManager {
             conn,
             windows: vec![],
             key_bindings: HashMap::new(),
+            screen_width: 0,
+            screen_height: 0,
         };
 
         // Create key bindings HashMap
@@ -62,13 +67,18 @@ impl WindowManager {
             }
         }
 
+        let root_screen = wm.conn.get_setup().roots().next().unwrap();
+        wm.screen_width = root_screen.width_in_pixels() as u32;
+        wm.screen_height = root_screen.height_in_pixels() as u32;
+
         // Get root window and set up substructure redirect
-        let root = wm.conn.get_setup().roots().next().unwrap().root();
+        let root = root_screen.root();
         wm.set_substructure_redirect(root)?;
         println!("Successfully set substructure redirect");
 
         // Set up key grabs
         wm.set_keygrabs(root);
+
 
         Ok(wm)
     }
@@ -94,6 +104,26 @@ impl WindowManager {
         })
     }
 
+    fn configure_windows(&self) {
+        let window_count = self.windows.len() as u32;
+        if window_count == 0 {
+            return;
+        }
+
+        let window_width = self.screen_width / window_count;
+        let window_height = self.screen_height;
+
+        for (i, win) in self.windows.iter().enumerate() {
+            let x = i as i32 * window_width as i32;
+            match self.configure_window(*win, x, 0, window_width, window_height) {
+                Ok(_) => (),
+                Err(e) => {
+                    println!("Failed to configure window {:?}: {:?}", win, e);
+                }
+            }
+        }
+    }
+
     fn handle_key_press(&mut self, ev: &x::KeyPressEvent) {
         let keycode = ev.detail();
         let modifiers = ModMask::from_bits_truncate(ev.state().bits());
@@ -113,10 +143,15 @@ impl WindowManager {
                     match window_to_kill {
                         Some(win) => {
                             println!("Killing client window: {:?}", win);
+
+                            // Send KillClient request
                             match self.conn.send_and_check_request(&x::KillClient { resource: win.resource_id() }) {
                                 Ok(_) => println!("Successfully killed window: {:?}", win),
                                 Err(e) => println!("Failed to kill window {:?}: {:?}", win, e),
                             }
+
+                            // Reconfigure remaining windows
+                            self.configure_windows();
                         }
                         None => {
                             println!("No windows to kill");
@@ -133,23 +168,11 @@ impl WindowManager {
     }
         
 
-    fn handle_map_request(&mut self, window: Window, screen_width: u32, screen_height: u32) {
+    fn handle_map_request(&mut self, window: Window) {
         // push new window to list
         self.windows.push(window);
 
-        // Calculate horizontal tiling layout
-        let window_width = screen_width / self.windows.len() as u32;
-        let window_height = screen_height;
-
-        for (i, win) in self.windows.iter().enumerate() {
-            let x = i as i32 * window_width as i32;
-            match self.configure_window(*win, x, 0, window_width, window_height) {
-                Ok(_) => (),
-                Err(e) => {
-                    println!("Failed to configure window {:?}: {:?}", win, e);
-                }
-            }
-        }
+        self.configure_windows();
 
         match self.conn.send_and_check_request(&x::MapWindow { window }) {
             Ok(_) => (),
@@ -192,13 +215,6 @@ impl WindowManager {
     }
 
     pub fn run(&mut self) -> xcb::Result<()> {
-        let root = self.conn.get_setup().roots().next().unwrap();
-        println!("Root window: {:?}", root.root());
-
-        // Get screen dimensions once
-        let screen_width = root.width_in_pixels() as u32;
-        let screen_height = root.height_in_pixels() as u32;
-
         loop {
             match self.conn.wait_for_event()? {
                 xcb::Event::X(x::Event::KeyPress(ev)) => {
@@ -208,7 +224,7 @@ impl WindowManager {
 
                 xcb::Event::X(x::Event::MapRequest(ev)) => {
                     println!("Received MapRequest event for window: {:?}", ev.window());
-                    self.handle_map_request(ev.window(), screen_width, screen_height);
+                    self.handle_map_request(ev.window());
                 }
 
                 xcb::Event::X(x::Event::ConfigureRequest(ev)) => {
@@ -223,7 +239,7 @@ impl WindowManager {
                     // Check if this is a new window
                     if !self.windows.contains(&ev.window()) {
                         println!("  -> New manageable window detected, treating as MapRequest");
-                        self.handle_map_request(ev.window(), screen_width, screen_height);
+                        self.handle_map_request(ev.window());
                     }
                 }
 
