@@ -1,16 +1,16 @@
 use std::collections::HashMap;
 use std::process::Command;
 use xcb::{
-    x::{self, Cw, EventMask, ModMask, Window},
-    Connection, ProtocolError,
+    Connection, ProtocolError, Xid, x::{self, Cw, EventMask, ModMask, Window}
 };
 
 use crate::config::ACTION_MAPPINGS;
+use crate::key_mapping::ActionEvent;
 
 pub struct WindowManager {
     conn: Connection,
     windows: Vec<Window>,
-    key_bindings: HashMap<(u8, ModMask), String>,
+    key_bindings: HashMap<(u8, ModMask), ActionEvent>,
 }
 
 impl WindowManager {
@@ -52,9 +52,9 @@ impl WindowManager {
                 if chunk.contains(&mapping.key.raw()) {
                     let keycode = wm.conn.get_setup().min_keycode() + i as u8;
                     wm.key_bindings
-                        .insert((keycode, modifiers), mapping.action.to_string());
+                        .insert((keycode, modifiers), mapping.action);
                     println!(
-                        "Mapped key {:?} (keycode: {}) with modifiers {:?} to action: {}",
+                        "Mapped key {:?} (keycode: {}) with modifiers {:?} to action: {:?}",
                         mapping.key, keycode, modifiers, mapping.action
                     );
                     break;
@@ -94,15 +94,35 @@ impl WindowManager {
         })
     }
 
-    fn handle_key_press(&self, ev: &x::KeyPressEvent) {
+    fn handle_key_press(&mut self, ev: &x::KeyPressEvent) {
         let keycode = ev.detail();
         let modifiers = ModMask::from_bits_truncate(ev.state().bits());
 
         if let Some(action) = self.key_bindings.get(&(keycode, modifiers)) {
-            println!("Executing command: {}", action);
-            match Command::new(action).spawn() {
-                Ok(_) => println!("Successfully spawned: {}", action),
-                Err(e) => println!("Failed to spawn {}: {:?}", action, e),
+            match action {
+                ActionEvent::Spawn(cmd) => {
+                    println!("Spawning command: {}", cmd);
+
+                    match Command::new(cmd).spawn() {
+                        Ok(_) => println!("Successfully spawned: {}", cmd),
+                        Err(e) => println!("Failed to spawn {}: {:?}", cmd, e),
+                    }
+                }
+                ActionEvent::KillClient => {
+                    let window_to_kill: Option<Window> = self.windows.pop();
+                    match window_to_kill {
+                        Some(win) => {
+                            println!("Killing client window: {:?}", win);
+                            match self.conn.send_and_check_request(&x::KillClient { resource: win.resource_id() }) {
+                                Ok(_) => println!("Successfully killed window: {:?}", win),
+                                Err(e) => println!("Failed to kill window {:?}: {:?}", win, e),
+                            }
+                        }
+                        None => {
+                            println!("No windows to kill");
+                        }
+                    }
+                }
             }
         } else {
             println!(
@@ -111,6 +131,7 @@ impl WindowManager {
             );
         }
     }
+        
 
     fn handle_map_request(&mut self, window: Window, screen_width: u32, screen_height: u32) {
         // push new window to list
