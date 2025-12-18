@@ -1,7 +1,9 @@
+use core::time;
 use std::collections::HashMap;
 use std::process::Command;
 use xcb::{
-    Connection, ProtocolError, Xid, x::{self, Cw, EventMask, ModMask, Window}
+    x::{self, Cw, EventMask, ModMask, Window},
+    Connection, ProtocolError, Xid,
 };
 
 use crate::config::ACTION_MAPPINGS;
@@ -14,6 +16,9 @@ pub struct WindowManager {
     key_bindings: HashMap<(u8, ModMask), ActionEvent>,
     screen_width: u32,
     screen_height: u32,
+    focused_border_pixel: u32,
+    normal_border_pixel: u32,
+    border_width: u32,
 }
 
 impl WindowManager {
@@ -35,7 +40,6 @@ impl WindowManager {
             (vec![], 0)
         };
 
-
         let mut wm = WindowManager {
             conn,
             windows: vec![],
@@ -43,6 +47,9 @@ impl WindowManager {
             key_bindings: HashMap::new(),
             screen_width: 0,
             screen_height: 0,
+            focused_border_pixel: 0,
+            normal_border_pixel: 0,
+            border_width: 5, // choose desired border thickness
         };
 
         // Create key bindings HashMap
@@ -58,8 +65,7 @@ impl WindowManager {
             for (i, chunk) in keysyms.chunks(keysyms_per_keycode).enumerate() {
                 if chunk.contains(&mapping.key.raw()) {
                     let keycode = wm.conn.get_setup().min_keycode() + i as u8;
-                    wm.key_bindings
-                        .insert((keycode, modifiers), mapping.action);
+                    wm.key_bindings.insert((keycode, modifiers), mapping.action);
                     println!(
                         "Mapped key {:?} (keycode: {}) with modifiers {:?} to action: {:?}",
                         mapping.key, keycode, modifiers, mapping.action
@@ -73,6 +79,9 @@ impl WindowManager {
         wm.screen_width = root_screen.width_in_pixels() as u32;
         wm.screen_height = root_screen.height_in_pixels() as u32;
 
+        wm.focused_border_pixel = root_screen.white_pixel();
+        wm.normal_border_pixel = root_screen.black_pixel();
+
         // Get root window and set up substructure redirect
         let root = root_screen.root();
         wm.set_substructure_redirect(root)?;
@@ -80,7 +89,6 @@ impl WindowManager {
 
         // Set up key grabs
         wm.set_keygrabs(root);
-
 
         Ok(wm)
     }
@@ -98,6 +106,7 @@ impl WindowManager {
             x::ConfigWindow::Y(y),
             x::ConfigWindow::Width(width),
             x::ConfigWindow::Height(height),
+            x::ConfigWindow::BorderWidth(self.border_width),
         ];
 
         self.conn.send_and_check_request(&x::ConfigureWindow {
@@ -112,16 +121,16 @@ impl WindowManager {
             return;
         }
 
-        let window_width = self.screen_width / window_count;
-        let window_height = self.screen_height;
+        let border_width = self.border_width as i32;
+        let cell = (self.screen_width as i32) / (window_count as i32);
+        let inner_w = (cell - 2 * border_width).max(1);
+        let inner_h = ((self.screen_height as i32) - 2 * border_width).max(1);
 
         for (i, win) in self.windows.iter().enumerate() {
-            let x = i as i32 * window_width as i32;
-            match self.configure_window(*win, x, 0, window_width, window_height) {
-                Ok(_) => (),
-                Err(e) => {
-                    println!("Failed to configure window {:?}: {:?}", win, e);
-                }
+            let x = i as i32 * cell;
+            let y = 0;
+            if let Err(e) = self.configure_window(*win, x, y, inner_w as u32, inner_h as u32) {
+                println!("Failed to configure window {:?}: {:?}", win, e);
             }
         }
     }
@@ -162,13 +171,16 @@ impl WindowManager {
             println!("Killing client window: {:?}", window_to_kill);
 
             // Send KillClient request
-            match self.conn.send_and_check_request(&x::KillClient { resource: window_to_kill.resource_id() }) {
+            match self.conn.send_and_check_request(&x::KillClient {
+                resource: window_to_kill.resource_id(),
+            }) {
                 Ok(_) => println!("Successfully killed window: {:?}", window_to_kill),
                 Err(e) => println!("Failed to kill window {:?}: {:?}", window_to_kill, e),
             }
 
             // Reconfigure remaining windows
             self.configure_windows();
+            self.shift_focus(-1);
         } else {
             println!("No windows to kill");
         }
@@ -181,10 +193,41 @@ impl WindowManager {
         }
 
         let window_count = self.windows.len() as isize;
-        self.focus = ((self.focus as isize + direction + window_count) % window_count) as usize;
+        let next_focus: usize =
+            ((self.focus as isize + direction + window_count) % window_count) as usize;
+        let next_window = self.windows[next_focus];
+        self.set_focus(next_window);
+        self.focus = next_focus;
         println!("Focus shifted to window index: {}", self.focus);
     }
-        
+
+    fn set_focus(&self, window: Window) {
+        if self.focus < self.windows.len() {
+            let current = self.windows[self.focus];
+            self.set_window_border(current, self.normal_border_pixel, self.border_width);
+        }
+
+        self.set_window_border(window, self.focused_border_pixel, self.border_width);
+        let _ = self.conn.send_and_check_request(&x::SetInputFocus {
+            revert_to: x::InputFocus::PointerRoot,
+            focus: window,
+            time: 0,
+        });
+    }
+
+    fn set_window_border(&self, window: Window, pixel: u32, width: u32) {
+        let _ = self
+            .conn
+            .send_and_check_request(&x::ChangeWindowAttributes {
+                window,
+                value_list: &[x::Cw::BorderPixel(pixel)],
+            });
+
+        let _ = self.conn.send_and_check_request(&x::ConfigureWindow {
+            window,
+            value_list: &[x::ConfigWindow::BorderWidth(width)],
+        });
+    }
 
     fn handle_map_request(&mut self, window: Window) {
         // push new window to list
@@ -198,6 +241,9 @@ impl WindowManager {
                 println!("Failed to map window {:?}: {:?}", window, e);
             }
         }
+
+        self.set_focus(window);
+        self.focus = self.windows.len() - 1;
     }
 
     fn set_substructure_redirect(&self, root: Window) -> Result<(), ProtocolError> {
@@ -255,10 +301,6 @@ impl WindowManager {
                     println!("  Requested size: {}x{}", ev.width(), ev.height());
 
                     // Check if this is a new window
-                    if !self.windows.contains(&ev.window()) {
-                        println!("  -> New manageable window detected, treating as MapRequest");
-                        self.handle_map_request(ev.window());
-                    }
                 }
 
                 xcb::Event::X(x::Event::MapNotify(ev)) => {
