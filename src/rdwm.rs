@@ -8,6 +8,7 @@ use xcb::{
 
 use crate::config::{ACTION_MAPPINGS, DEFAULT_BORDER_WIDTH, NUM_WORKSPACES};
 use crate::key_mapping::ActionEvent;
+use crate::ewmh::EwmhHint;
 use crate::workspace::Workspace;
 
 pub struct ScreenConfig {
@@ -20,6 +21,8 @@ pub struct ScreenConfig {
 pub struct Atoms {
     pub net_number_of_desktops: x::Atom,
     pub net_current_desktop: x::Atom,
+    pub net_supported: x::Atom,
+    pub net_supporting_wm_check: x::Atom,
 }
 
 pub struct WindowManagerConfig {
@@ -41,6 +44,7 @@ pub struct WindowManager {
     border_width: u32,
     atoms: Atoms,
     root_window: Window,
+    wm_check_window: Window,
 }
 
 impl WindowManager {
@@ -50,6 +54,9 @@ impl WindowManager {
 
         // Initialize configuration before creating WindowManager
         let config = Self::initialize_config(&conn)?;
+
+        // Create WM check window
+        let wm_check_window = Self::create_wm_check_window(&conn, config.root_window);
 
         let wm = WindowManager {
             conn,
@@ -63,6 +70,7 @@ impl WindowManager {
             border_width: DEFAULT_BORDER_WIDTH,
             atoms: config.atoms,
             root_window: config.root_window,
+            wm_check_window,
         };
 
         // Get root window and set up substructure redirect
@@ -73,7 +81,7 @@ impl WindowManager {
         wm.set_keygrabs();
 
         // Set up EWMH hints
-        wm.publish_workspaces();
+        wm.publish_ewmh_hints();
 
         Ok(wm)
     }
@@ -164,32 +172,35 @@ impl WindowManager {
         }
     }
 
-    fn initialize_atoms(conn: &Connection) -> Atoms {
-        let net_number_of_desktops = Self::intern_atom(conn, "_NET_NUMBER_OF_DESKTOPS");
-        let net_current_desktop = Self::intern_atom(conn, "_NET_CURRENT_DESKTOP");
-
-        Atoms {
-            net_number_of_desktops,
-            net_current_desktop,
-        }
-    }
-
-    fn intern_atom(conn: &Connection, name: &str) -> x::Atom {
-        let cookie = conn.send_request(&x::InternAtom {
-            only_if_exists: false,
-            name: name.as_bytes(),
-        });
-        conn.wait_for_reply(cookie)
-            .expect("If Interning Atom fails we don't want to start the WM")
-            .atom()
-    }
-
     fn get_root_window(conn: &Connection) -> Window {
         conn.get_setup()
             .roots()
             .next()
             .expect("Cannot find root")
             .root()
+    }
+
+    fn create_wm_check_window(conn: &Connection, root: Window) -> Window {
+        // Create a check window for _NET_SUPPORTING_WM_CHECK
+        // This window is used by clients to verify the WM is EWMH compliant
+        let win = conn.generate_id();
+        let values = [
+            x::Cw::OverrideRedirect(true),
+        ];
+        conn.send_request(&x::CreateWindow {
+            depth: 0,
+            wid: win,
+            parent: root,
+            x: -1,
+            y: -1,
+            width: 1,
+            height: 1,
+            border_width: 0,
+            class: x::WindowClass::InputOnly,
+            visual: 0,
+            value_list: &values,
+        });
+        win
     }
 
     fn set_substructure_redirect(&self) -> Result<(), ProtocolError> {
@@ -224,10 +235,7 @@ impl WindowManager {
         }
     }
 
-    fn publish_workspaces(&self) {
-        self.set_cardinal32(self.atoms.net_number_of_desktops, &[NUM_WORKSPACES as u32]);
-        self.set_cardinal32(self.atoms.net_current_desktop, &[0 as u32]);
-    }
+
 
     /*
 
@@ -241,8 +249,89 @@ impl WindowManager {
 
     */
 
+    fn initialize_atoms(conn: &Connection) -> Atoms {
+        let net_number_of_desktops = Self::intern_atom(conn, EwmhHint::NetNumberOfDesktops.as_str());
+        let net_current_desktop = Self::intern_atom(conn, EwmhHint::NetCurrentDesktop.as_str());
+        let net_supported = Self::intern_atom(conn, EwmhHint::NetSupported.as_str());
+        let net_supporting_wm_check = Self::intern_atom(conn, EwmhHint::NetSupportingWmCheck.as_str());
+
+        Atoms {
+            net_number_of_desktops,
+            net_current_desktop,
+            net_supported,
+            net_supporting_wm_check,
+        }
+    }
+
+    fn intern_atom(conn: &Connection, name: &str) -> x::Atom {
+        let cookie = conn.send_request(&x::InternAtom {
+            only_if_exists: false,
+            name: name.as_bytes(),
+        });
+        conn.wait_for_reply(cookie)
+            .expect("If Interning Atom fails we don't want to start the WM")
+            .atom()
+    }
+
+    fn publish_ewmh_hints(&self) {
+        // Publish _NET_SUPPORTING_WM_CHECK on both root and check window
+        // This points the root window to the check window
+        self.set_window_property(
+            self.root_window(),
+            self.atoms.net_supporting_wm_check,
+            &[self.wm_check_window.resource_id()],
+        );
+
+        // The check window points to itself
+        self.set_window_property(
+            self.wm_check_window,
+            self.atoms.net_supporting_wm_check,
+            &[self.wm_check_window.resource_id()],
+        );
+
+        // Publish _NET_SUPPORTING - list of supported atoms
+        let supported_atoms = [
+            self.atoms.net_supported,
+            self.atoms.net_supporting_wm_check,
+            self.atoms.net_number_of_desktops,
+            self.atoms.net_current_desktop,
+        ];
+
+        self.set_atom(
+            self.atoms.net_supported,
+            &supported_atoms.iter().map(|a| a.resource_id()).collect::<Vec<_>>(),
+        );
+
+        // Publish desktop information
+        self.set_cardinal32(self.atoms.net_number_of_desktops, &[NUM_WORKSPACES as u32]);
+        self.set_cardinal32(self.atoms.net_current_desktop, &[0 as u32]);
+
+        info!("Published EWMH hints successfully");
+    }
+
     fn update_current_workspace(&self) {
         self.set_cardinal32(self.atoms.net_current_desktop, &[self.workspace as u32]);
+    }
+
+    fn set_window_property(&self, window: Window, prop: x::Atom, values: &[u32]) {
+        self.conn.send_request(&x::ChangeProperty {
+            mode: x::PropMode::Replace,
+            window,
+            property: prop,
+            r#type: x::ATOM_WINDOW,
+            data: values,
+        });
+
+    }
+
+    fn set_atom(&self, prop: x::Atom, values: &[u32]) {
+        self.conn.send_request(&x::ChangeProperty {
+            mode: x::PropMode::Replace,
+            window: self.root_window(),
+            property: prop,
+            r#type: x::ATOM_ATOM,
+            data: values,
+        });
     }
 
     fn set_cardinal32(&self, prop: x::Atom, values: &[u32]) {
@@ -250,7 +339,7 @@ impl WindowManager {
             mode: x::PropMode::Replace,
             window: self.root_window(),
             property: prop,
-            r#type: x::ATOM_CARDINAL, // CARDINAL
+            r#type: x::ATOM_CARDINAL,
             data: values,
         });
     }
