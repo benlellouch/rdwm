@@ -1,6 +1,7 @@
 mod config;
 mod key_mapping;
 mod rdwm;
+mod workspace;
 
 fn main() {
     match rdwm::WindowManager::new() {

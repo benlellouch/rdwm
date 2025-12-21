@@ -2,6 +2,9 @@ use crate::key_mapping::{ActionEvent, ActionMapping};
 use xcb::x::ModMask;
 use xkbcommon::xkb;
 
+pub const NUM_WORKSPACES: usize = 10;
+pub const DEFAULT_BORDER_WIDTH: u32 = 5;
+
 pub static ACTION_MAPPINGS: &[ActionMapping] = &[
     ActionMapping {
         key: xkb::Keysym::Return,
@@ -9,8 +12,8 @@ pub static ACTION_MAPPINGS: &[ActionMapping] = &[
         action: ActionEvent::Spawn("st"),
     },
     ActionMapping {
-        key: xkb::Keysym::w,
-        modifiers: &[ModMask::N1],
+        key: xkb::Keysym::Return,
+        modifiers: &[ModMask::N1, ModMask::SHIFT],
         action: ActionEvent::Spawn("google-chrome-stable"),
     },
     ActionMapping {
@@ -34,12 +37,12 @@ pub static ACTION_MAPPINGS: &[ActionMapping] = &[
         action: ActionEvent::FocusNext,
     },
     ActionMapping {
-        key: xkb::Keysym::t,
+        key: xkb::Keysym::exclam,
         modifiers: &[ModMask::N1],
         action: ActionEvent::Workspace(0),
     },
     ActionMapping {
-        key: xkb::Keysym::y,
+        key: xkb::Keysym::at,
         modifiers: &[ModMask::N1],
         action: ActionEvent::Workspace(1),
     },
