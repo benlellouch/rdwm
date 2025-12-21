@@ -313,7 +313,7 @@ impl WindowManager {
     }
 
     fn change_workspace(&mut self, new_workspace: usize) {
-        if self.workspace == new_workspace {
+        if self.workspace == new_workspace  || new_workspace >= NUM_WORKSPACES{
             return;
         }
         let old_wspace_cookies: Vec<_> = self
