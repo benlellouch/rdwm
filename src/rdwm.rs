@@ -35,12 +35,15 @@ pub struct WindowManager {
     key_bindings: HashMap<(u8, ModMask), ActionEvent>,
     screen_width: u32,
     screen_height: u32,
+    screen_height_usable: u32,
     focused_border_pixel: u32,
     normal_border_pixel: u32,
     border_width: u32,
     atoms: Atoms,
     root_window: Window,
     wm_check_window: Window,
+    dock_windows: Vec<Window>,
+    dock_height: u32,
 }
 
 impl WindowManager {
@@ -54,6 +57,9 @@ impl WindowManager {
         // Create WM check window
         let wm_check_window = Self::create_wm_check_window(&conn, config.root_window);
 
+        let dock_height = 30u32;
+        let screen_height_usable = config.screen_config.height.saturating_sub(dock_height);
+
         let wm = WindowManager {
             conn,
             workspaces: Default::default(),
@@ -61,12 +67,15 @@ impl WindowManager {
             key_bindings: config.key_bindings,
             screen_width: config.screen_config.width,
             screen_height: config.screen_config.height,
+            screen_height_usable,
             focused_border_pixel: config.screen_config.focused_border_pixel,
             normal_border_pixel: config.screen_config.normal_border_pixel,
             border_width: DEFAULT_BORDER_WIDTH,
             atoms: config.atoms,
             root_window: config.root_window,
             wm_check_window,
+            dock_windows: Vec::new(),
+            dock_height,
         };
 
         // Get root window and set up substructure redirect
@@ -167,6 +176,30 @@ impl WindowManager {
             })
     }
 
+    fn is_dock_window(&self, window: Window) -> bool {
+        // Query _NET_WM_WINDOW_TYPE property
+        let cookie = self.conn.send_request(&x::GetProperty {
+            delete: false,
+            window,
+            property: self.atoms.net_wm_window_type,
+            r#type: x::ATOM_ATOM,
+            long_offset: 0,
+            long_length: 32,
+        });
+
+        if let Ok(reply) = self.conn.wait_for_reply(cookie) {
+            let atoms_vec: &[x::Atom] = reply.value();
+            // Check if the window type includes _NET_WM_WINDOW_TYPE_DOCK
+            for atom in atoms_vec {
+                if atom.resource_id() == self.atoms.net_wm_window_type_dock.resource_id() {
+                    debug!("Window {:?} identified as dock window", window);
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     
 
 
@@ -209,6 +242,8 @@ impl WindowManager {
             self.atoms.net_supporting_wm_check,
             self.atoms.net_number_of_desktops,
             self.atoms.net_current_desktop,
+            self.atoms.net_wm_window_type,
+            self.atoms.net_wm_window_type_dock,
         ];
 
         Atoms::set_atom(
@@ -226,7 +261,8 @@ impl WindowManager {
     }
 
     fn update_current_workspace(&self) {
-        Atoms::set_cardinal32(&self.conn, self.root_window(), self.atoms.net_current_desktop, &[self.workspace as u32]);
+        let cookie = Atoms::set_cardinal32(&self.conn, self.root_window(), self.atoms.net_current_desktop, &[self.workspace as u32]);
+        let _ = self.conn.check_request(cookie);
     }
 
     
@@ -304,7 +340,7 @@ impl WindowManager {
         let border_width = self.border_width as i32;
         let cell = (self.screen_width as i32) / (window_count as i32);
         let inner_w = (cell - 2 * border_width).max(1);
-        let inner_h = ((self.screen_height as i32) - 2 * border_width).max(1);
+        let inner_h = ((self.screen_height_usable as i32) - 2 * border_width).max(1);
 
         let config_cookies: Vec<_> = self
             .current_workspace()
@@ -320,6 +356,25 @@ impl WindowManager {
         config_cookies.into_iter().for_each(|cookie| {
             let _ = self.conn.check_request(cookie);
         });
+
+    }
+
+    fn configure_dock_windows(&self) {
+        let dock_y = (self.screen_height as i32) - (self.dock_height as i32);
+        
+        for window in &self.dock_windows {
+            let config_values = [
+                x::ConfigWindow::X(0),
+                x::ConfigWindow::Y(dock_y),
+                x::ConfigWindow::Width(self.screen_width),
+                x::ConfigWindow::Height(self.dock_height),
+            ];
+
+            let _ = self.conn.send_and_check_request(&x::ConfigureWindow {
+                window: *window,
+                value_list: &config_values,
+            });
+        }
     }
 
     fn set_focus(&mut self, idx: usize) {
@@ -445,6 +500,8 @@ impl WindowManager {
         });
 
         self.update_current_workspace();
+
+
     }
 
     /*
@@ -480,19 +537,46 @@ impl WindowManager {
     }
 
     fn handle_map_request(&mut self, window: Window) {
-        self.current_workspace_mut().push_window(window);
-        self.configure_windows();
-        match self.conn.send_and_check_request(&x::MapWindow { window }) {
-            Ok(_) => (),
-            Err(e) => {
-                error!("Failed to map window {:?}: {:?}", window, e);
+        // Check if this is a dock window
+        if self.is_dock_window(window) {
+            debug!("Mapping dock window: {:?}", window);
+            self.dock_windows.push(window);
+            match self.conn.send_and_check_request(&x::MapWindow { window }) {
+                Ok(_) => {
+                    info!("Successfully mapped dock window: {:?}", window);
+                    self.configure_dock_windows();
+                }
+                Err(e) => {
+                    error!("Failed to map dock window {:?}: {:?}", window, e);
+                }
             }
+        } else {
+            // Regular window - add to current workspace
+            self.current_workspace_mut().push_window(window);
+            self.configure_windows();
+            match self.conn.send_and_check_request(&x::MapWindow { window }) {
+                Ok(_) => (),
+                Err(e) => {
+                    error!("Failed to map window {:?}: {:?}", window, e);
+                }
+            }
+            let idx = self.current_workspace().num_of_windows().saturating_sub(1);
+            self.set_focus(idx);
         }
-        let idx = self.current_workspace().num_of_windows().saturating_sub(1);
-        self.set_focus(idx);
     }
 
     fn handle_destroy_event(&mut self, window: Window) {
+        // Check if it's a dock window
+        let window_id = window.resource_id();
+        let was_dock = self.dock_windows.iter().any(|w| w.resource_id() == window_id);
+        
+        if was_dock {
+            debug!("Dock window destroyed: {:?}", window);
+            self.dock_windows.retain(|w| w.resource_id() != window_id);
+            return;
+        }
+
+        // Handle regular window destruction
         let curr_workspace = self.current_workspace_mut();
 
         if curr_workspace.num_of_windows() == 0 {
@@ -500,10 +584,10 @@ impl WindowManager {
             return;
         }
 
-        curr_workspace.retain(|&win| win.resource_id() != window.resource_id());
+        curr_workspace.retain(|&win| win.resource_id() != window_id);
 
         if let Some(focused) = curr_workspace.get_focused_window() {
-            if focused.resource_id() == window.resource_id() {
+            if focused.resource_id() == window_id {
                 self.shift_focus(-1);
             }
         }

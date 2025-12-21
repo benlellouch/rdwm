@@ -1,3 +1,4 @@
+use xcb::VoidCookieChecked;
 use xcb::x;
 use xcb::Connection;
 
@@ -8,6 +9,8 @@ pub struct Atoms {
     pub net_current_desktop: x::Atom,
     pub net_supported: x::Atom,
     pub net_supporting_wm_check: x::Atom,
+    pub net_wm_window_type: x::Atom,
+    pub net_wm_window_type_dock: x::Atom,
 }
 
 impl Atoms {
@@ -16,12 +19,16 @@ impl Atoms {
         let net_current_desktop = Self::intern_atom(conn, EwmhHint::NetCurrentDesktop.as_str());
         let net_supported = Self::intern_atom(conn, EwmhHint::NetSupported.as_str());
         let net_supporting_wm_check = Self::intern_atom(conn, EwmhHint::NetSupportingWmCheck.as_str());
+        let net_wm_window_type = Self::intern_atom(conn, "_NET_WM_WINDOW_TYPE");
+        let net_wm_window_type_dock = Self::intern_atom(conn, "_NET_WM_WINDOW_TYPE_DOCK");
 
         Atoms {
             net_number_of_desktops,
             net_current_desktop,
             net_supported,
             net_supporting_wm_check,
+            net_wm_window_type,
+            net_wm_window_type_dock,
         }
     }
 
@@ -45,7 +52,7 @@ impl Atoms {
         });
     }
 
-    pub fn set_atom(conn: &Connection, root: x::Window, prop: x::Atom, values: &[u32]) {
+    pub fn set_atom(conn: &Connection, root: x::Window, prop: x::Atom, values: &[u32]){
         conn.send_request(&x::ChangeProperty {
             mode: x::PropMode::Replace,
             window: root,
@@ -55,13 +62,13 @@ impl Atoms {
         });
     }
 
-    pub fn set_cardinal32(conn: &Connection, root: x::Window, prop: x::Atom, values: &[u32]) {
-        conn.send_request(&x::ChangeProperty {
+    pub fn set_cardinal32(conn: &Connection, root: x::Window, prop: x::Atom, values: &[u32]) -> VoidCookieChecked {
+        conn.send_request_checked(&x::ChangeProperty {
             mode: x::PropMode::Replace,
             window: root,
             property: prop,
             r#type: x::ATOM_CARDINAL,
             data: values,
-        });
+        })
     }
 }

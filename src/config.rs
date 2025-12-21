@@ -37,13 +37,53 @@ pub static ACTION_MAPPINGS: &[ActionMapping] = &[
         action: ActionEvent::FocusNext,
     },
     ActionMapping {
-        key: xkb::Keysym::exclam,
+        key: xkb::Keysym::_1,
         modifiers: &[ModMask::N1],
         action: ActionEvent::Workspace(0),
     },
     ActionMapping {
-        key: xkb::Keysym::at,
+        key: xkb::Keysym::_2,
         modifiers: &[ModMask::N1],
         action: ActionEvent::Workspace(1),
+    },
+        ActionMapping {
+        key: xkb::Keysym::_3,
+        modifiers: &[ModMask::N1],
+        action: ActionEvent::Workspace(2),
+    },
+    ActionMapping {
+        key: xkb::Keysym::_4,
+        modifiers: &[ModMask::N1],
+        action: ActionEvent::Workspace(3),
+    },
+    ActionMapping {
+        key: xkb::Keysym::_5,
+        modifiers: &[ModMask::N1],
+        action: ActionEvent::Workspace(4),
+    },
+    ActionMapping {
+        key: xkb::Keysym::_6,
+        modifiers: &[ModMask::N1],
+        action: ActionEvent::Workspace(5),
+    },
+    ActionMapping {
+        key: xkb::Keysym::_7,
+        modifiers: &[ModMask::N1],
+        action: ActionEvent::Workspace(6),
+    },
+    ActionMapping {
+        key: xkb::Keysym::_8,
+        modifiers: &[ModMask::N1],
+        action: ActionEvent::Workspace(7),
+    },
+    ActionMapping {
+        key: xkb::Keysym::_9,
+        modifiers: &[ModMask::N1],
+        action: ActionEvent::Workspace(8),
+    },
+        ActionMapping {
+        key: xkb::Keysym::_0,
+        modifiers: &[ModMask::N1],
+        action: ActionEvent::Workspace(9),
     },
 ];
