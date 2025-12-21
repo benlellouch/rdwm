@@ -1,6 +1,7 @@
 mod config;
 mod key_mapping;
 mod ewmh;
+mod atoms;
 mod rdwm;
 mod workspace;
 
