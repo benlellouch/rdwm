@@ -360,7 +360,13 @@ impl WindowManager {
                     let inner_w = (cell - 2 * border_width).max(1);
                     let x = (cumulative * screen_partitions + self.window_gap) as i32;
                     cumulative += twin.size();
-                    self.configure_window(twin.window(), x, self.window_gap as i32, inner_w, inner_h)
+                    self.configure_window(
+                        twin.window(),
+                        x,
+                        self.window_gap as i32,
+                        inner_w,
+                        inner_h,
+                    )
                 })
                 .collect();
 
