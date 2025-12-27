@@ -1,4 +1,5 @@
 use crate::key_mapping::{ActionEvent, ActionMapping};
+use std::option_env;
 use xcb::x::ModMask;
 use xkbcommon::xkb;
 
@@ -6,7 +7,12 @@ pub const NUM_WORKSPACES: usize = 10;
 pub const DEFAULT_BORDER_WIDTH: u32 = 3;
 pub const DEFAULT_WINDOW_GAP: u32 = 0;
 
-const MOD: ModMask = ModMask::N4;
+const TESTING: Option<&str> = option_env!("WM_TESTING");
+const MOD: ModMask = if TESTING.is_none() {
+    ModMask::N4
+} else {
+    ModMask::N1
+};
 
 /// Usage: binding!(key, [modifiers], action)
 macro_rules! binding {
@@ -19,19 +25,25 @@ macro_rules! binding {
     };
 }
 
- #[rustfmt::skip] 
+#[rustfmt::skip] 
 pub static ACTION_MAPPINGS: &[ActionMapping] = &[
     // ==================== SPAWN BINDINGS ====================
     binding!(xkb::Keysym::Return, [MOD], ActionEvent::Spawn("st")),
     binding!(xkb::Keysym::Return, [MOD, ModMask::SHIFT], ActionEvent::Spawn("google-chrome-stable")),
     binding!(xkb::Keysym::space, [MOD], ActionEvent::Spawn("rofi -show drun")),
 
+    // ==================== MULTIMEDIA BINDINGS ====================
+    binding!(xkb::Keysym::XF86_ScrollUp, [], ActionEvent::Spawn("amixer set Master -q 5%+")),
+    binding!(xkb::Keysym::XF86_ScrollDown, [], ActionEvent::Spawn("amixer set Master -q 5%-")),
+    binding!(xkb::Keysym::XF86_AudioRaiseVolume, [], ActionEvent::Spawn("amixer set Master -q 5%+")),
+    binding!(xkb::Keysym::XF86_AudioLowerVolume, [], ActionEvent::Spawn("amixer set Master -q 5%-")),
+
     // ==================== WINDOW MANAGEMENT ====================
     binding!(xkb::Keysym::q, [MOD], ActionEvent::Kill),
-    binding!(xkb::Keysym::j, [MOD], ActionEvent::PrevWindow),
-    binding!(xkb::Keysym::k, [MOD], ActionEvent::NextWindow),
-    binding!(xkb::Keysym::j, [MOD, ModMask::SHIFT], ActionEvent::SwapLeft),
-    binding!(xkb::Keysym::k, [MOD, ModMask::SHIFT], ActionEvent::SwapRight),
+    binding!(xkb::Keysym::Left, [MOD], ActionEvent::PrevWindow),
+    binding!(xkb::Keysym::Right, [MOD], ActionEvent::NextWindow),
+    binding!(xkb::Keysym::Left, [MOD, ModMask::SHIFT], ActionEvent::SwapLeft),
+    binding!(xkb::Keysym::Right, [MOD, ModMask::SHIFT], ActionEvent::SwapRight),
 
     // ==================== WINDOW SIZING ====================
     binding!(xkb::Keysym::equal, [MOD], ActionEvent::IncreaseWindowWeight(1)),

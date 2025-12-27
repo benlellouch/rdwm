@@ -114,6 +114,7 @@ impl Workspace {
 
     pub fn retain<F: FnMut(&Window) -> bool>(&mut self, f: F) {
         let mut f = f;
-        self.windows.retain(|tw| f(&tw.window))
+        self.windows.retain(|tw| f(&tw.window));
+        self.update_focus();
     }
 }

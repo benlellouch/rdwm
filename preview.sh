@@ -1,5 +1,5 @@
 #!/bin/sh
-cargo build --release
+WM_TESTING=True cargo build --release
 
 set -e 
 

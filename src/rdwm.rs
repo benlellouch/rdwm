@@ -480,10 +480,6 @@ impl WindowManager {
                 Ok(_) => info!("Successfully killed window: {:?}", window_to_kill),
                 Err(e) => error!("Failed to kill window {:?}: {:?}", window_to_kill, e),
             }
-
-            // Reconfigure remaining workspaces
-            self.shift_focus(0);
-            self.configure_windows(self.workspace);
         }
     }
 
@@ -581,6 +577,9 @@ impl WindowManager {
         });
 
         self.update_current_workspace();
+        if let Some(focus) = self.current_workspace().get_focus() {
+            self.set_focus(focus);
+        }
     }
 
     fn send_to_workspace(&mut self, workspace_id: usize) {
@@ -697,15 +696,8 @@ impl WindowManager {
             debug!("No window to destroy");
             return;
         }
-
         curr_workspace.retain(|&win| win.resource_id() != window_id);
-
-        if let Some(focused) = curr_workspace.get_focused_window() {
-            if focused.resource_id() == window_id {
-                self.shift_focus(-1);
-            }
-        }
-
+        self.shift_focus(0);
         self.configure_windows(self.workspace);
     }
 
@@ -752,6 +744,11 @@ impl WindowManager {
                 xcb::Event::X(x::Event::DestroyNotify(ev)) => {
                     debug!("Received DestroyNotify event for window {:?}", ev.window());
                     self.handle_destroy_event(ev.window());
+                }
+
+                xcb::Event::X(x::Event::UnmapNotify(ev)) => {
+                    debug!("Received UnmapNotify event for window {:?}", ev.window());
+                    // self.handle_destroy_event(ev.window());
                 }
 
                 xcb::Event::X(x::Event::MapNotify(ev)) => {
