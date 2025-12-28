@@ -51,7 +51,7 @@ impl WindowManager {
         info!("Connected to X.");
 
         // Initialize configuration before creating WindowManager
-        let config = Self::initialize_config(&conn)?;
+        let config = Self::initialize_config(&conn);
 
         // Create WM check window
         let wm_check_window = Self::create_wm_check_window(&conn, config.root_window);
@@ -59,7 +59,7 @@ impl WindowManager {
         let dock_height = 30u32;
         let screen_height_usable = config.screen_config.height.saturating_sub(dock_height);
 
-        let wm = WindowManager {
+        let wm = Self {
             conn,
             workspaces: Default::default(),
             workspace: 0,
@@ -105,26 +105,26 @@ impl WindowManager {
 
     fn initialize_config(
         conn: &Connection,
-    ) -> Result<WindowManagerConfig, Box<dyn std::error::Error>> {
+    ) -> WindowManagerConfig {
         let (keysyms, keysyms_per_keycode) = fetch_keyboard_mapping(conn);
         let key_bindings = populate_key_bindings(conn, &keysyms, keysyms_per_keycode);
         let screen_config = Self::setup_screen(conn);
         let atoms = Atoms::initialize(conn);
         let root_window = Self::get_root_window(conn);
 
-        Ok(WindowManagerConfig {
+        WindowManagerConfig {
             key_bindings,
             screen_config,
             atoms,
             root_window,
-        })
+        }
     }
 
     fn setup_screen(conn: &Connection) -> ScreenConfig {
         let root = conn.get_setup().roots().next().expect("Cannot find root");
         ScreenConfig {
-            width: root.width_in_pixels() as u32,
-            height: root.height_in_pixels() as u32,
+            width: u32::from(root.width_in_pixels()),
+            height: u32::from(root.height_in_pixels()),
             focused_border_pixel: root.white_pixel(),
             normal_border_pixel: root.black_pixel(),
         }
@@ -188,7 +188,7 @@ impl WindowManager {
             // Check if the window type includes _NET_WM_WINDOW_TYPE_DOCK
             for atom in atoms_vec {
                 if atom.resource_id() == self.atoms.net_wm_window_type_dock.resource_id() {
-                    debug!("Window {:?} identified as dock window", window);
+                    debug!("Window {window:?} identified as dock window");
                     return true;
                 }
             }
@@ -242,7 +242,7 @@ impl WindowManager {
             self.atoms.net_supported,
             &supported_atoms
                 .iter()
-                .map(|a| a.resource_id())
+                .map(xcb::Xid::resource_id)
                 .collect::<Vec<_>>(),
         );
 
@@ -285,7 +285,7 @@ impl WindowManager {
 
     */
 
-    fn root_window(&self) -> Window {
+    const fn root_window(&self) -> Window {
         self.root_window
     }
 
@@ -373,11 +373,11 @@ impl WindowManager {
                 })
                 .collect();
 
-            config_cookies.into_iter().for_each(|cookie| {
+            for cookie in config_cookies.into_iter() {
                 if let Err(e) = self.conn.check_request(cookie) {
-                    warn!("Failed to configure window: {:?}", e);
+                    warn!("Failed to configure window: {e:?}");
                 }
-            });
+            }
         }
     }
 
@@ -454,7 +454,7 @@ impl WindowManager {
     */
 
     fn spawn_client(&self, cmd: &str) {
-        info!("Spawning command: {}", cmd);
+        info!("Spawning command: {cmd}");
         let parts: Vec<&str> = cmd.split_whitespace().collect();
         if parts.is_empty() {
             error!("Empty command provided");
@@ -467,20 +467,20 @@ impl WindowManager {
         }
 
         match command.spawn() {
-            Ok(_) => info!("Successfully spawned: {}", cmd),
+            Ok(_) => info!("Successfully spawned: {cmd}"),
             Err(e) => error!("Failed to spawn {cmd}: {e:?}"),
         }
     }
 
     fn kill_client(&mut self) {
         if let Some(window_to_kill) = self.current_workspace_mut().removed_focused_window() {
-            info!("Killing client window: {:?}", window_to_kill);
+            info!("Killing client window: {window_to_kill:?}");
 
             // Send KillClient request
             match self.conn.send_and_check_request(&x::KillClient {
                 resource: window_to_kill.resource_id(),
             }) {
-                Ok(_) => info!("Successfully killed window: {window_to_kill:?}"),
+                Ok(()) => info!("Successfully killed window: {window_to_kill:?}"),
                 Err(e) => error!("Failed to kill window {window_to_kill:?}: {e:?}"),
             }
         }
@@ -501,7 +501,7 @@ impl WindowManager {
 
     fn shift_focus(&mut self, direction: isize) {
         if let Some(next_focus) = self.next_window_index(direction) {
-            debug!("Focus shifted to window index: {}", next_focus);
+            debug!("Focus shifted to window index: {next_focus}");
             self.set_focus(next_focus);
         }
     }
@@ -572,12 +572,12 @@ impl WindowManager {
             })
             .collect();
 
-        old_wspace_cookies.into_iter().for_each(|cookie| {
+        for cookie in old_wspace_cookies { {
             let _ = self.conn.check_request(cookie);
-        });
-        new_wspace_cookies.into_iter().for_each(|cookie| {
+        } }
+        for cookie in new_wspace_cookies { {
             let _ = self.conn.check_request(cookie);
-        });
+        } }
 
         self.update_current_workspace();
         if let Some(focus) = self.current_workspace().get_focus() {
@@ -633,10 +633,10 @@ impl WindowManager {
                 ActionEvent::SwapRight => self.swap_window(1),
                 ActionEvent::SwapLeft => self.swap_window(-1),
                 ActionEvent::IncreaseWindowWeight(increment) => {
-                    self.increase_window_weight(*increment)
+                    self.increase_window_weight(*increment);
                 }
                 ActionEvent::DecreaseWindowWeight(increment) => {
-                    self.decrease_window_weight(*increment)
+                    self.decrease_window_weight(*increment);
                 }
                 ActionEvent::IncreaseWindowGap(increment) => self.increase_window_gap(*increment),
                 ActionEvent::DecreaseWindowGap(increment) => self.decrease_window_gap(*increment),
@@ -651,10 +651,10 @@ impl WindowManager {
     fn handle_map_request(&mut self, window: Window) {
         // Check if this is a dock window
         if self.is_dock_window(window) {
-            debug!("Mapping dock window: {:?}", window);
+            debug!("Mapping dock window: {window:?}");
             self.dock_windows.push(window);
             match self.conn.send_and_check_request(&x::MapWindow { window }) {
-                Ok(_) => {
+                Ok(()) => {
                     info!("Successfully mapped dock window: {window:?}");
                     self.configure_dock_windows();
                 }
@@ -676,7 +676,7 @@ impl WindowManager {
                 }
             }
             match self.conn.send_and_check_request(&x::MapWindow { window }) {
-                Ok(_) => (),
+                Ok(()) => (),
                 Err(e) => {
                     error!("Failed to map window {window:?}: {e:?}");
                 }
@@ -696,7 +696,7 @@ impl WindowManager {
             .any(|w| w.resource_id() == window_id);
 
         if was_dock {
-            debug!("Dock window destroyed: {:?}", window);
+            debug!("Dock window destroyed: {window:?}");
             self.dock_windows.retain(|w| w.resource_id() != window_id);
             return;
         }
@@ -749,7 +749,7 @@ impl WindowManager {
         {
             Ok(_) => debug!("Ran autostart succesfully!"),
             Err(e) => debug!("Failed to run autostart: {e:?}"),
-        };
+        }
     }
 
     pub fn run(&mut self) -> xcb::Result<()> {
@@ -781,7 +781,7 @@ impl WindowManager {
                 }
 
                 ev => {
-                    debug!("Ignoring event: {:?}", ev);
+                    debug!("Ignoring event: {ev:?}");
                 }
             }
         }

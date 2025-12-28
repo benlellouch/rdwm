@@ -14,7 +14,7 @@ pub struct Atoms {
 }
 
 impl Atoms {
-    pub fn initialize(conn: &Connection) -> Atoms {
+    pub fn initialize(conn: &Connection) -> Self {
         let net_number_of_desktops =
             Self::intern_atom(conn, EwmhHint::NetNumberOfDesktops.as_str());
         let net_current_desktop = Self::intern_atom(conn, EwmhHint::NetCurrentDesktop.as_str());
@@ -24,7 +24,7 @@ impl Atoms {
         let net_wm_window_type = Self::intern_atom(conn, "_NET_WM_WINDOW_TYPE");
         let net_wm_window_type_dock = Self::intern_atom(conn, "_NET_WM_WINDOW_TYPE_DOCK");
 
-        Atoms {
+        Self {
             net_number_of_desktops,
             net_current_desktop,
             net_supported,

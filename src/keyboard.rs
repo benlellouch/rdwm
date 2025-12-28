@@ -66,10 +66,9 @@ pub fn set_keygrabs(
             keyboard_mode: x::GrabMode::Async,
         }) {
             Ok(()) => info!(
-                "Successfully grabbed key: keycode {} with modifiers {:?}",
-                keycode, modifiers
+                "Successfully grabbed key: keycode {keycode} with modifiers {modifiers:?}"
             ),
-            Err(e) => warn!("Failed to grab key {}: {:?}", keycode, e),
+            Err(e) => warn!("Failed to grab key {keycode}: {e:?}"),
         }
     }
 }

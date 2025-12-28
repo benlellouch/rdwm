@@ -6,12 +6,12 @@ pub enum EwmhHint {
 }
 
 impl EwmhHint {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
-            EwmhHint::NetNumberOfDesktops => "_NET_NUMBER_OF_DESKTOPS",
-            EwmhHint::NetCurrentDesktop => "_NET_CURRENT_DESKTOP",
-            EwmhHint::NetSupported => "_NET_SUPPORTED",
-            EwmhHint::NetSupportingWmCheck => "_NET_SUPPORTING_WM_CHECK",
+            Self::NetNumberOfDesktops => "_NET_NUMBER_OF_DESKTOPS",
+            Self::NetCurrentDesktop => "_NET_CURRENT_DESKTOP",
+            Self::NetSupported => "_NET_SUPPORTED",
+            Self::NetSupportingWmCheck => "_NET_SUPPORTING_WM_CHECK",
         }
     }
 }

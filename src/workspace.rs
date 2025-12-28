@@ -9,30 +9,30 @@ pub struct Client {
 }
 
 impl Client {
-    pub fn window(&self) -> Window {
+    pub const fn window(&self) -> Window {
         self.window
     }
 
-    pub fn size(&self) -> u32 {
+    pub const fn size(&self) -> u32 {
         self.size
     }
 
-    pub fn increase_window_size(&mut self, increment: u32) {
-        self.size += increment
+    pub const fn increase_window_size(&mut self, increment: u32) {
+        self.size += increment;
     }
 
-    pub fn decrease_window_size(&mut self, increment: u32) {
+    pub const fn decrease_window_size(&mut self, increment: u32) {
         if self.size > 1 {
             self.size -= increment;
         }
     }
 
-    pub fn is_mapped(&self) -> bool {
+    pub const fn is_mapped(&self) -> bool {
         self.is_mapped
     }
 
-    pub fn set_mapped(&mut self, mapped: bool) {
-        self.is_mapped = mapped
+    pub const fn set_mapped(&mut self, mapped: bool) {
+        self.is_mapped = mapped;
     }
 }
 
@@ -71,7 +71,7 @@ impl Workspace {
         true
     }
 
-    pub fn get_focus(&self) -> Option<usize> {
+    pub const fn get_focus(&self) -> Option<usize> {
         self.focus
     }
 
