@@ -261,13 +261,25 @@ impl WindowManager {
         info!("Published EWMH hints successfully");
     }
 
-    fn update_current_workspace(&self) {
+    fn update_current_desktop(&self) {
         Atoms::set_cardinal32(
             &self.conn,
             self.root_window(),
             self.atoms.current_desktop,
             &[self.workspace as u32],
         );
+    }
+
+    fn set_window_desktop(&self, window: Window, workspace: u32) {
+        Atoms::set_cardinal32(&self.conn, window, self.atoms.wm_desktop, &[workspace]);
+    }
+
+    fn get_window_desktop(&self, window: Window) -> Option<u32> {
+        Atoms::get_cardinal32(&self.conn, window, self.atoms.wm_desktop)
+    }
+
+    fn get_current_desktop(&self) -> Option<u32> {
+        Atoms::get_cardinal32(&self.conn, self.root_window(), self.atoms.current_desktop)
     }
 
     /*
@@ -301,6 +313,21 @@ impl WindowManager {
 
     fn get_workspace(&self, workspace_id: usize) -> Option<&Workspace> {
         self.workspaces.get(workspace_id)
+    }
+
+    fn get_workspace_mut(&mut self, workspace_id: usize) -> Option<&mut Workspace> {
+        self.workspaces.get_mut(workspace_id)
+    }
+
+    fn get_root_window_children(&self) -> Result<Vec<Window>, xcb::Error> {
+        let cookie = self.conn.send_request(&x::QueryTree {
+            window: self.root_window(),
+        });
+
+        let reply = self.conn.wait_for_reply(cookie)?;
+        let children: Vec<Window> = reply.children().to_vec();
+
+        Ok(children)
     }
 
     /*
@@ -442,7 +469,7 @@ impl WindowManager {
     fn supports_wm_delete(&self, window: Window) -> Result<bool, xcb::Error> {
         let cookie = self.conn.send_request(&x::GetProperty {
             delete: false,
-            window: window,
+            window,
             property: self.atoms.wm_protocols,
             r#type: x::ATOM_ATOM,
             long_offset: 0,
@@ -454,7 +481,7 @@ impl WindowManager {
         // In xcb, for type ATOM, the value is raw bytes of 32-bit atom ids.
         // reply.value::<x::Atom>() gives a typed slice.
         let atoms_list: &[x::Atom] = reply.value();
-        Ok(atoms_list.iter().any(|a| *a == self.atoms.wm_delete_window))
+        Ok(atoms_list.contains(&self.atoms.wm_delete_window))
     }
 
     fn send_wm_delete(&self, window: x::Window) -> Result<(), xcb::Error> {
@@ -609,6 +636,10 @@ impl WindowManager {
         if self.workspace == new_workspace_id || new_workspace_id >= NUM_WORKSPACES {
             return;
         }
+        debug!(
+            "Switching from workspace {} to {new_workspace_id}",
+            self.workspace
+        );
         let old_wspace_cookies: Vec<_> = self
             .current_workspace()
             .iter_windows()
@@ -639,9 +670,12 @@ impl WindowManager {
                 let _ = self.conn.check_request(cookie);
             }
         }
-        self.update_current_workspace();
+        self.update_current_desktop();
         if let Some(focus) = self.current_workspace().get_focus() {
             self.set_focus(focus);
+        }
+        if let Some(workspace_id) = self.get_current_desktop() {
+            debug!("Current desktop is set to {workspace_id}");
         }
     }
 
@@ -657,6 +691,7 @@ impl WindowManager {
                     self.configure_windows(self.workspace);
                     self.configure_windows(workspace_id);
                     self.shift_focus(0);
+                    self.set_window_desktop(window_to_send, workspace_id as u32);
                 }
             }
             None => error!(
@@ -742,6 +777,10 @@ impl WindowManager {
             let idx = self.current_workspace().num_of_windows().saturating_sub(1);
             self.set_focus(idx);
             self.configure_windows(self.workspace);
+            self.set_window_desktop(window, self.workspace as u32);
+            if let Some(desktop) = self.get_window_desktop(window) {
+                debug!("Desktop is set to {desktop} for {window:?}")
+            }
         }
     }
 
@@ -810,8 +849,32 @@ impl WindowManager {
         }
     }
 
+    fn grab_windows(&mut self) {
+        match self.get_root_window_children() {
+            Ok(children) => {
+                children.iter().for_each(|window| {
+                    if let Some(workspace_id) = self.get_window_desktop(*window) {
+                        if let Some(workspace) = self.get_workspace_mut(workspace_id as usize) {
+                            debug!("Assigning {window:?} to desktop {workspace_id}");
+                            workspace.push_window(*window);
+                        };
+                    }
+                });
+            }
+
+            Err(e) => error!("Failed to grab children of root at startup: {e:?}"),
+        }
+
+        if let Some(workspace_id) = self.get_current_desktop() {
+            debug!("Desktop upon restart is {workspace_id}");
+            self.workspace = (workspace_id as usize + 1) % NUM_WORKSPACES;
+            self.go_to_workspace(workspace_id as usize);
+        }
+    }
+
     pub fn run(&mut self) -> xcb::Result<()> {
         Self::spawn_autostart();
+        self.grab_windows();
         loop {
             match self.conn.wait_for_event()? {
                 xcb::Event::X(x::Event::KeyPress(ev)) => {
@@ -820,17 +883,17 @@ impl WindowManager {
                 }
 
                 xcb::Event::X(x::Event::MapRequest(ev)) => {
-                    debug!("Received MapRequest event for window: {:?}", ev.window());
+                    debug!("Received MapRequest event for {:?}", ev.window());
                     self.handle_map_request(ev.window());
                 }
 
                 xcb::Event::X(x::Event::DestroyNotify(ev)) => {
-                    debug!("Received DestroyNotify event for window {:?}", ev.window());
+                    debug!("Received DestroyNotify event for  {:?}", ev.window());
                     self.handle_destroy_event(ev.window());
                 }
 
                 xcb::Event::X(x::Event::UnmapNotify(ev)) => {
-                    debug!("Received UnmapNotify event for window {:?}", ev.window());
+                    debug!("Received UnmapNotify event for {:?}", ev.window());
                     self.handle_unmap_event(ev.window());
                 }
 
