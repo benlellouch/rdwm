@@ -43,7 +43,7 @@ Notes
 - [x] Lightweight, minimal dependencies (`xcb`, `xkbcommon`) and simple configuration in `src/config.rs`
 - [x] Basic logging via `log` + `env_logger`
 - [x] Move windows around within a workspace 
-- [ ] Resize windows interactively
+- [x] Resize windows interactively
 - [x] Move windows between workspaces
 - [x] Add EWMH (NETWM) / ICCCM hints for better compatibility with external panels/status bars and desktop tools
 - [ ] Create a custom status bar (or integration points) so you can build your own bar displaying workspaces, layout, and window titles
