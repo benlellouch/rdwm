@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="resources/ferris_wm.png" width="300" />
+  <img src="resources/ferris_3.png" width="300" />
 </p>
 
 # <p align="center"> RDWM </p>
