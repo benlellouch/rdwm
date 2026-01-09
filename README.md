@@ -2,7 +2,7 @@
   <img src="resources/ferris_wm.png" width="300" />
 </p>
 
-#  <div style="text-align: center;"> RDWM </div>
+# <p align="center"> RDWM </p>
 
 RDWM is a small, minimalist tiling window manager written in Rust using XCB.
 
