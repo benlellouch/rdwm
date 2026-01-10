@@ -51,48 +51,6 @@ impl Atoms {
             .atom()
     }
 
-    #[allow(dead_code)]
-    pub fn set_window_property(
-        conn: &Connection,
-        window: x::Window,
-        prop: x::Atom,
-        values: &[u32],
-    ) {
-        conn.send_request(&x::ChangeProperty {
-            mode: x::PropMode::Replace,
-            window,
-            property: prop,
-            r#type: x::ATOM_WINDOW,
-            data: values,
-        });
-    }
-
-    #[allow(dead_code)]
-    pub fn set_atom(conn: &Connection, root: x::Window, prop: x::Atom, values: &[u32]) {
-        if let Err(e) = conn.send_and_check_request(&x::ChangeProperty {
-            mode: x::PropMode::Replace,
-            window: root,
-            property: prop,
-            r#type: x::ATOM_ATOM,
-            data: values,
-        }) {
-            error!("Failed to set Atom: {e:?}");
-        }
-    }
-
-    #[allow(dead_code)]
-    pub fn set_cardinal32(conn: &Connection, window: x::Window, prop: x::Atom, values: &[u32]) {
-        if let Err(e) = conn.send_and_check_request(&x::ChangeProperty {
-            mode: x::PropMode::Replace,
-            window,
-            property: prop,
-            r#type: x::ATOM_CARDINAL,
-            data: values,
-        }) {
-            error!("Failed to set Cardinal: {e:?}");
-        }
-    }
-
     pub fn get_cardinal32(conn: &Connection, window: x::Window, prop: x::Atom) -> Option<u32> {
         let cookie = conn.send_request(&x::GetProperty {
             delete: false,

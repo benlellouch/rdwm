@@ -10,6 +10,7 @@ use crate::atoms::Atoms;
 use crate::config::{
     DEFAULT_BORDER_WIDTH, DEFAULT_DOCK_HEIGHT, DEFAULT_WINDOW_GAP, NUM_WORKSPACES,
 };
+use crate::ewmh_manager::EwmhManager;
 use crate::key_mapping::ActionEvent;
 use crate::keyboard::{fetch_keyboard_mapping, populate_key_bindings};
 use crate::layout::{Layout, Rect};
@@ -121,7 +122,7 @@ impl<T: Layout> WindowManager<T> {
         wm.x11.apply_effects_checked(&keygrab_effects);
 
         // Set up EWMH hints
-        let ewmh_effects = wm.publish_ewmh_hints();
+        let ewmh_effects = EwmhManager::new(&wm.x11).publish_hints();
         wm.x11.apply_effects_unchecked(&ewmh_effects);
 
         Ok(wm)
@@ -207,75 +208,8 @@ impl<T: Layout> WindowManager<T> {
 
     */
 
-    fn publish_ewmh_hints(&self) -> Vec<Effect> {
-        let atoms = self.x11.atoms();
-        let root = self.x11.root();
-        let check = self.x11.wm_check_window();
-
-        let supported_atoms = [
-            atoms.supported,
-            atoms.supporting_wm_check,
-            atoms.number_of_desktops,
-            atoms.current_desktop,
-            atoms.wm_window_type,
-            atoms.wm_window_type_dock,
-        ];
-
-        vec![
-            Effect::SetWindowProperty {
-                window: root,
-                atom: atoms.supporting_wm_check,
-                values: vec![check.resource_id()],
-            },
-            Effect::SetWindowProperty {
-                window: check,
-                atom: atoms.supporting_wm_check,
-                values: vec![check.resource_id()],
-            },
-            Effect::SetAtomList {
-                window: root,
-                atom: atoms.supported,
-                values: supported_atoms
-                    .iter()
-                    .map(xcb::Xid::resource_id)
-                    .collect::<Vec<_>>(),
-            },
-            Effect::SetCardinal32 {
-                window: root,
-                atom: atoms.number_of_desktops,
-                value: NUM_WORKSPACES as u32,
-            },
-            Effect::SetCardinal32 {
-                window: root,
-                atom: atoms.current_desktop,
-                value: 0,
-            },
-        ]
-    }
-
-    fn update_current_desktop_effect(&self) -> Effect {
-        Effect::SetCardinal32 {
-            window: self.x11.root(),
-            atom: self.x11.atoms().current_desktop,
-            value: self.current_workspace as u32,
-        }
-    }
-
-    fn set_window_desktop_effect(&self, window: Window, current_workspace: u32) -> Effect {
-        Effect::SetCardinal32 {
-            window,
-            atom: self.x11.atoms().wm_desktop,
-            value: current_workspace,
-        }
-    }
-
-    fn get_window_desktop(&self, window: Window) -> Option<u32> {
-        self.x11.get_cardinal32(window, self.x11.atoms().wm_desktop)
-    }
-
-    fn get_current_desktop(&self) -> Option<u32> {
-        self.x11
-            .get_cardinal32(self.x11.root(), self.x11.atoms().current_desktop)
+    fn ewmh(&self) -> EwmhManager<'_> {
+        EwmhManager::new(&self.x11)
     }
 
     /*
@@ -555,7 +489,7 @@ impl<T: Layout> WindowManager<T> {
         }
 
         effects.extend(self.configure_windows(self.current_workspace));
-        effects.push(self.update_current_desktop_effect());
+        effects.push(self.ewmh().current_desktop_effect(self.current_workspace));
         if let Some(focus) = self.current_workspace().get_focus() {
             effects.extend(self.set_focus(focus));
         }
@@ -582,8 +516,10 @@ impl<T: Layout> WindowManager<T> {
                     effects.extend(self.configure_windows(self.current_workspace));
                     effects.extend(self.configure_windows(workspace_id));
                     effects.extend(self.shift_focus(0));
-                    effects
-                        .push(self.set_window_desktop_effect(window_to_send, workspace_id as u32));
+                    effects.push(
+                        self.ewmh()
+                            .window_desktop_effect(window_to_send, workspace_id as u32),
+                    );
                 }
             }
             None => error!(
@@ -665,7 +601,10 @@ impl<T: Layout> WindowManager<T> {
             let idx = self.current_workspace().num_of_windows().saturating_sub(1);
             effects.extend(self.set_focus(idx));
             effects.extend(self.configure_windows(self.current_workspace));
-            effects.push(self.set_window_desktop_effect(window, self.current_workspace as u32));
+            effects.push(
+                self.ewmh()
+                    .window_desktop_effect(window, self.current_workspace as u32),
+            );
         }
 
         effects
@@ -746,7 +685,7 @@ impl<T: Layout> WindowManager<T> {
         match self.get_root_window_children() {
             Ok(children) => {
                 children.iter().for_each(|window| {
-                    if let Some(workspace_id) = self.get_window_desktop(*window) {
+                    if let Some(workspace_id) = self.ewmh().get_window_desktop(*window) {
                         if let Some(current_workspace) =
                             self.get_workspace_mut(workspace_id as usize)
                         {
@@ -760,7 +699,7 @@ impl<T: Layout> WindowManager<T> {
             Err(e) => error!("Failed to grab children of root at startup: {e:?}"),
         }
 
-        if let Some(workspace_id) = self.get_current_desktop() {
+        if let Some(workspace_id) = self.ewmh().get_current_desktop() {
             debug!("Desktop upon restart is {workspace_id}");
             self.current_workspace = (workspace_id as usize + 1) % NUM_WORKSPACES;
             return self.go_to_workspace(workspace_id as usize);
