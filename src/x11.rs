@@ -1,4 +1,4 @@
-use crate::{atoms::Atoms, rdwm::Effect};
+use crate::{atoms::Atoms, effect::Effect};
 use log::error;
 use xcb::{
     x::{self, EventMask, Window},

@@ -1,6 +1,6 @@
 use xcb::{x, Xid};
 
-use crate::{config::NUM_WORKSPACES, rdwm::Effect, x11::X11};
+use crate::{config::NUM_WORKSPACES, effect::Effect, x11::X11};
 
 pub struct EwmhManager<'a> {
     x11: &'a X11,

@@ -10,61 +10,13 @@ use crate::atoms::Atoms;
 use crate::config::{
     DEFAULT_BORDER_WIDTH, DEFAULT_DOCK_HEIGHT, DEFAULT_WINDOW_GAP, NUM_WORKSPACES,
 };
+use crate::effect::Effect;
 use crate::ewmh_manager::EwmhManager;
 use crate::key_mapping::ActionEvent;
 use crate::keyboard::{fetch_keyboard_mapping, populate_key_bindings};
 use crate::layout::{Layout, Rect};
 use crate::workspace::Workspace;
 use crate::x11::X11;
-
-#[derive(Debug, Clone)]
-pub enum Effect {
-    Map(Window),
-    Unmap(Window),
-    Configure {
-        window: Window,
-        x: i32,
-        y: i32,
-        w: u32,
-        h: u32,
-        border: u32,
-    },
-    ConfigurePositionSize {
-        window: Window,
-        x: i32,
-        y: i32,
-        w: u32,
-        h: u32,
-    },
-    Focus(Window),
-    SetBorder {
-        window: Window,
-        pixel: u32,
-        width: u32,
-    },
-    SetCardinal32 {
-        window: Window,
-        atom: x::Atom,
-        value: u32,
-    },
-    SetAtomList {
-        window: Window,
-        atom: x::Atom,
-        values: Vec<u32>,
-    },
-    SetWindowProperty {
-        window: Window,
-        atom: x::Atom,
-        values: Vec<u32>,
-    },
-    KillClient(Window),
-    SendWmDelete(Window),
-    GrabKey {
-        keycode: u8,
-        modifiers: ModMask,
-        grab_window: Window,
-    },
-}
 
 pub struct ScreenConfig {
     pub width: u32,
