@@ -2,8 +2,6 @@ use log::error;
 use xcb::x;
 use xcb::Connection;
 
-use crate::ewmh::EwmhHint;
-
 pub struct Atoms {
     pub number_of_desktops: x::Atom,
     pub current_desktop: x::Atom,
@@ -18,10 +16,10 @@ pub struct Atoms {
 
 impl Atoms {
     pub fn initialize(conn: &Connection) -> Self {
-        let number_of_desktops = Self::intern_atom(conn, EwmhHint::NetNumberOfDesktops.as_str());
-        let current_desktop = Self::intern_atom(conn, EwmhHint::NetCurrentDesktop.as_str());
-        let supported = Self::intern_atom(conn, EwmhHint::NetSupported.as_str());
-        let supporting_wm_check = Self::intern_atom(conn, EwmhHint::NetSupportingWmCheck.as_str());
+        let number_of_desktops = Self::intern_atom(conn, "_NET_NUMBER_OF_DESKTOPS");
+        let current_desktop = Self::intern_atom(conn, "_NET_CURRENT_DESKTOP");
+        let supported = Self::intern_atom(conn, "_NET_SUPPORTED");
+        let supporting_wm_check = Self::intern_atom(conn, "_NET_SUPPORTING_WM_CHECK");
         let wm_window_type = Self::intern_atom(conn, "_NET_WM_WINDOW_TYPE");
         let wm_window_type_dock = Self::intern_atom(conn, "_NET_WM_WINDOW_TYPE_DOCK");
         let wm_protocols = Self::intern_atom(conn, "WM_PROTOCOLS");

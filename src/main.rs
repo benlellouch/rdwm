@@ -2,7 +2,6 @@ use crate::horizontal_layout::HorizontalLayout;
 
 mod atoms;
 mod config;
-mod ewmh;
 mod ewmh_manager;
 mod horizontal_layout;
 mod key_mapping;
