@@ -91,9 +91,8 @@ impl<T: Layout> WindowManager<T> {
         info!("Connected to X.");
 
         let key_bindings = Self::setup_key_bindings(&conn);
-        let screen = Self::setup_screen(&conn);
+        let (screen, root_window) = Self::setup_root(&conn);
         let atoms = Atoms::initialize(&conn);
-        let root_window = Self::get_root_window(&conn);
 
         // Create WM check window
         let wm_check_window = Self::create_wm_check_window(&conn, root_window);
@@ -127,7 +126,10 @@ impl<T: Layout> WindowManager<T> {
     }
 
     fn usable_screen_height(&self) -> u32 {
-        self.screen.height.saturating_sub(self.dock_height)
+        if !self.dock_windows.is_empty() {
+            return self.screen.height.saturating_sub(self.dock_height);
+        }
+        self.screen.height
     }
 
     fn apply_effects(&self, effects: Vec<Effect>) {
@@ -167,22 +169,15 @@ impl<T: Layout> WindowManager<T> {
         populate_key_bindings(conn, &keysyms, keysyms_per_keycode)
     }
 
-    fn setup_screen(conn: &Connection) -> ScreenConfig {
+    fn setup_root(conn: &Connection) -> (ScreenConfig, Window) {
         let root = conn.get_setup().roots().next().expect("Cannot find root");
-        ScreenConfig {
+        let screen = ScreenConfig {
             width: u32::from(root.width_in_pixels()),
             height: u32::from(root.height_in_pixels()),
             focused_border_pixel: root.white_pixel(),
             normal_border_pixel: root.black_pixel(),
-        }
-    }
-
-    fn get_root_window(conn: &Connection) -> Window {
-        conn.get_setup()
-            .roots()
-            .next()
-            .expect("Cannot find root")
-            .root()
+        };
+        (screen, root.root())
     }
 
     fn create_wm_check_window(conn: &Connection, root: Window) -> Window {
