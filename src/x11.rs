@@ -12,6 +12,16 @@ pub struct X11 {
     wm_check_window: Window,
 }
 
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum WindowType {
+    /// Normal client windows the WM should manage (tile/focus/workspace).
+    Managed,
+    /// Windows that manage themselves (override-redirect popups, menus, tooltips, etc).
+    Unmanaged,
+    /// Dock/panel windows (EWMH _NET_WM_WINDOW_TYPE_DOCK).
+    Dock,
+}
+
 impl X11 {
     pub fn new(conn: Connection, root: Window, atoms: Atoms, wm_check_window: Window) -> Self {
         Self {
@@ -553,7 +563,27 @@ impl X11 {
         Ok(reply.children().to_vec())
     }
 
-    pub fn is_dock_window(&self, window: Window) -> bool {
+    pub fn classify_window(&self, window: Window) -> WindowType {
+        // Docks are special-cased: even if override-redirect is set, we want to treat them as docks.
+        if self.is_dock_window(window) {
+            return WindowType::Dock;
+        }
+
+        match self.is_override_redirect(window) {
+            Ok(true) => WindowType::Unmanaged,
+            Ok(false) => WindowType::Managed,
+            // Preserve existing behavior: on query failure, treat as manageable.
+            Err(_e) => WindowType::Managed,
+        }
+    }
+
+    fn is_override_redirect(&self, window: Window) -> Result<bool, xcb::Error> {
+        let cookie = self.conn.send_request(&x::GetWindowAttributes { window });
+        let reply = self.conn.wait_for_reply(cookie)?;
+        Ok(reply.override_redirect())
+    }
+
+    fn is_dock_window(&self, window: Window) -> bool {
         let cookie = self.conn.send_request(&x::GetProperty {
             delete: false,
             window,
