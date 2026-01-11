@@ -95,11 +95,21 @@ impl X11 {
                 atom,
                 value,
             } => self.set_cardinal32_unchecked(*window, *atom, *value),
+            Effect::SetCardinal32List {
+                window,
+                atom,
+                values,
+            } => self.set_cardinal32_list_unchecked(*window, *atom, values),
             Effect::SetAtomList {
                 window,
                 atom,
                 values,
             } => self.set_atom_list_unchecked(*window, *atom, values),
+            Effect::SetUtf8String {
+                window,
+                atom,
+                value,
+            } => self.set_utf8_string_unchecked(*window, *atom, value),
             Effect::SetWindowProperty {
                 window,
                 atom,
@@ -141,11 +151,21 @@ impl X11 {
                 atom,
                 value,
             } => self.set_cardinal32_checked(*window, *atom, *value),
+            Effect::SetCardinal32List {
+                window,
+                atom,
+                values,
+            } => self.set_cardinal32_list_checked(*window, *atom, values),
             Effect::SetAtomList {
                 window,
                 atom,
                 values,
             } => self.set_atom_list_checked(*window, *atom, values),
+            Effect::SetUtf8String {
+                window,
+                atom,
+                value,
+            } => self.set_utf8_string_checked(*window, *atom, value),
             Effect::SetWindowProperty {
                 window,
                 atom,
@@ -240,6 +260,16 @@ impl X11 {
         });
     }
 
+    fn set_cardinal32_list_unchecked(&self, window: Window, atom: x::Atom, values: &[u32]) {
+        self.conn.send_request(&x::ChangeProperty {
+            mode: x::PropMode::Replace,
+            window,
+            property: atom,
+            r#type: x::ATOM_CARDINAL,
+            data: values,
+        });
+    }
+
     fn set_atom_list_unchecked(&self, window: Window, atom: x::Atom, values: &[u32]) {
         self.conn.send_request(&x::ChangeProperty {
             mode: x::PropMode::Replace,
@@ -257,6 +287,16 @@ impl X11 {
             property: atom,
             r#type: x::ATOM_WINDOW,
             data: values,
+        });
+    }
+
+    fn set_utf8_string_unchecked(&self, window: Window, atom: x::Atom, value: &str) {
+        self.conn.send_request(&x::ChangeProperty {
+            mode: x::PropMode::Replace,
+            window,
+            property: atom,
+            r#type: self.atoms.utf8_string,
+            data: value.as_bytes(),
         });
     }
 
@@ -362,6 +402,21 @@ impl X11 {
         })]
     }
 
+    fn set_cardinal32_list_checked(
+        &self,
+        window: Window,
+        atom: x::Atom,
+        values: &[u32],
+    ) -> Vec<VoidCookieChecked> {
+        vec![self.conn.send_request_checked(&x::ChangeProperty {
+            mode: x::PropMode::Replace,
+            window,
+            property: atom,
+            r#type: x::ATOM_CARDINAL,
+            data: values,
+        })]
+    }
+
     fn set_atom_list_checked(
         &self,
         window: Window,
@@ -389,6 +444,21 @@ impl X11 {
             property: atom,
             r#type: x::ATOM_WINDOW,
             data: values,
+        })]
+    }
+
+    fn set_utf8_string_checked(
+        &self,
+        window: Window,
+        atom: x::Atom,
+        value: &str,
+    ) -> Vec<VoidCookieChecked> {
+        vec![self.conn.send_request_checked(&x::ChangeProperty {
+            mode: x::PropMode::Replace,
+            window,
+            property: atom,
+            r#type: self.atoms.utf8_string,
+            data: value.as_bytes(),
         })]
     }
 

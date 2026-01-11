@@ -30,10 +30,20 @@ pub enum Effect {
         atom: x::Atom,
         value: u32,
     },
+    SetCardinal32List {
+        window: Window,
+        atom: x::Atom,
+        values: Vec<u32>,
+    },
     SetAtomList {
         window: Window,
         atom: x::Atom,
         values: Vec<u32>,
+    },
+    SetUtf8String {
+        window: Window,
+        atom: x::Atom,
+        value: String,
     },
     SetWindowProperty {
         window: Window,

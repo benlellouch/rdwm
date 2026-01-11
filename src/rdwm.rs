@@ -79,6 +79,16 @@ impl<T: Layout> WindowManager<T> {
         let ewmh_effects = EwmhManager::new(&wm.x11).publish_hints();
         wm.x11.apply_effects_unchecked(&ewmh_effects);
 
+        // Publish geometry/workarea now that we know screen size.
+        let mut ewmh_runtime_effects = vec![
+            wm.ewmh()
+                .desktop_geometry_effect(wm.screen.width, wm.screen.height),
+            wm.ewmh()
+                .workarea_effect(0, 0, wm.screen.width, wm.usable_screen_height()),
+        ];
+        ewmh_runtime_effects.extend(wm.ewmh_state_effects());
+        wm.x11.apply_effects_unchecked(&ewmh_runtime_effects);
+
         Ok(wm)
     }
 
@@ -294,7 +304,112 @@ impl<T: Layout> WindowManager<T> {
             effects.push(Effect::Focus(new_focus_window));
         }
 
+        effects.push(
+            self.ewmh()
+                .active_window_effect(self.current_workspace().get_focused_window()),
+        );
+
         effects
+    }
+
+    fn all_managed_windows(&self) -> Vec<Window> {
+        // window_to_workspace is authoritative for client windows.
+        let mut entries = self
+            .window_to_workspace
+            .iter()
+            .map(|(w, ws)| (*ws, w.resource_id(), *w))
+            .collect::<Vec<_>>();
+        entries.sort_by_key(|(ws, id, _w)| (*ws, *id));
+
+        let mut out = entries
+            .into_iter()
+            .map(|(_ws, _id, w)| w)
+            .collect::<Vec<_>>();
+
+        // Docks are managed but not part of workspaces.
+        let mut docks = self.dock_windows.clone();
+        docks.sort_by_key(xcb::Xid::resource_id);
+        out.extend(docks);
+
+        out
+    }
+
+    fn ewmh_state_effects(&self) -> Vec<Effect> {
+        let windows = self.all_managed_windows();
+        let mut effects = self.ewmh().client_list_effects(&windows);
+        effects.push(
+            self.ewmh()
+                .active_window_effect(self.current_workspace().get_focused_window()),
+        );
+        effects
+    }
+
+    fn focus_window(&mut self, window: Window) -> Vec<Effect> {
+        let mut effects = Vec::new();
+
+        let workspace_id = self
+            .window_to_workspace
+            .get(&window)
+            .copied()
+            .or_else(|| self.ewmh().get_window_desktop(window).map(|d| d as usize));
+
+        let Some(workspace_id) = workspace_id else {
+            return effects;
+        };
+
+        if workspace_id < NUM_WORKSPACES && workspace_id != self.current_workspace {
+            effects.extend(self.go_to_workspace(workspace_id));
+        }
+
+        if let Some(idx) = self.current_workspace().index_of_window(window) {
+            effects.extend(self.set_focus(idx));
+        }
+
+        effects
+    }
+
+    fn close_window(&mut self, window: Window) -> Vec<Effect> {
+        // Keep internal state until Unmap/Destroy arrives; just request close.
+        match self.x11.supports_wm_delete(window) {
+            Ok(true) => vec![Effect::SendWmDelete(window)],
+            Ok(false) => vec![Effect::KillClient(window)],
+            Err(e) => {
+                error!(
+                    "Failed to query WM_PROTOCOLS for {window:?}: {e:?}. Falling back to force kill."
+                );
+                vec![Effect::KillClient(window)]
+            }
+        }
+    }
+
+    fn handle_client_message(&mut self, ev: &x::ClientMessageEvent) -> Vec<Effect> {
+        let atoms = self.x11.atoms();
+        let msg_type = ev.r#type();
+
+        let data32 = match ev.data() {
+            x::ClientMessageData::Data32(d) => d,
+            _ => return vec![],
+        };
+
+        if msg_type == atoms.current_desktop {
+            return self.go_to_workspace(data32[0] as usize);
+        }
+
+        if msg_type == atoms.active_window {
+            let target = ev.window();
+            let mut effects = self.focus_window(target);
+            effects.extend(self.ewmh_state_effects());
+            return effects;
+        }
+
+        if msg_type == atoms.close_window {
+            let target = ev.window();
+            let mut effects = self.close_window(target);
+            effects.extend(self.ewmh_state_effects());
+            return effects;
+        }
+
+        vec![]
     }
 
     /*
@@ -330,6 +445,7 @@ impl<T: Layout> WindowManager<T> {
 
     fn kill_client(&mut self) -> Vec<Effect> {
         if let Some(window) = self.current_workspace_mut().removed_focused_window() {
+            self.window_to_workspace.remove(&window);
             info!("Killing client window: {window:?}");
 
             match self.x11.supports_wm_delete(window) {
@@ -452,6 +568,8 @@ impl<T: Layout> WindowManager<T> {
         effects.push(self.ewmh().current_desktop_effect(self.current_workspace));
         if let Some(focus) = self.current_workspace().get_focus() {
             effects.extend(self.set_focus(focus));
+        } else {
+            effects.push(self.ewmh().active_window_effect(None));
         }
 
         effects
@@ -467,6 +585,8 @@ impl<T: Layout> WindowManager<T> {
             Some(window_to_send) => {
                 if let Some(new_workspace) = self.workspaces.get_mut(workspace_id) {
                     new_workspace.push_window(window_to_send);
+                    self.window_to_workspace
+                        .insert(window_to_send, workspace_id);
                     effects.push(Effect::Unmap(window_to_send));
                     effects.push(Effect::SetBorder {
                         window: window_to_send,
@@ -540,9 +660,19 @@ impl<T: Layout> WindowManager<T> {
         // Check if this is a dock window
         if self.x11.is_dock_window(window) {
             debug!("Mapping dock window: {window:?}");
+            let was_empty = self.dock_windows.is_empty();
             self.dock_windows.push(window);
             effects.push(Effect::Map(window));
             effects.extend(self.configure_dock_windows());
+
+            if was_empty {
+                effects.push(self.ewmh().workarea_effect(
+                    0,
+                    0,
+                    self.screen.width,
+                    self.usable_screen_height(),
+                ));
+            }
         } else {
             // Regular window - add to current current_workspace
             match self
@@ -569,6 +699,8 @@ impl<T: Layout> WindowManager<T> {
             );
         }
 
+        effects.extend(self.ewmh_state_effects());
+
         effects
     }
 
@@ -582,18 +714,31 @@ impl<T: Layout> WindowManager<T> {
 
         if was_dock {
             debug!("Dock window destroyed: {window:?}");
+            let was_nonempty = !self.dock_windows.is_empty();
             self.dock_windows.retain(|w| w.resource_id() != window_id);
-            return vec![];
+
+            let mut effects = Vec::new();
+            if was_nonempty && self.dock_windows.is_empty() {
+                effects.push(self.ewmh().workarea_effect(
+                    0,
+                    0,
+                    self.screen.width,
+                    self.usable_screen_height(),
+                ));
+            }
+            effects.extend(self.ewmh_state_effects());
+            return effects;
         }
 
-        if let Some(workspace_id) = self.window_to_workspace.get(&window)
-            && let Some(current_workspace) = self.workspaces.get_mut(*workspace_id)
+        if let Some(workspace_id) = self.window_to_workspace.remove(&window)
+            && let Some(current_workspace) = self.workspaces.get_mut(workspace_id)
         {
             current_workspace.remove_client(&window_id);
         }
 
         let mut effects = self.shift_focus(0);
         effects.extend(self.configure_windows(self.current_workspace));
+        effects.extend(self.ewmh_state_effects());
         effects
     }
 
@@ -616,6 +761,7 @@ impl<T: Layout> WindowManager<T> {
 
         let mut effects = self.shift_focus(-1);
         effects.extend(self.configure_windows(self.current_workspace));
+        effects.extend(self.ewmh_state_effects());
         effects
     }
 
@@ -655,6 +801,8 @@ impl<T: Layout> WindowManager<T> {
                     {
                         debug!("Assigning {window:?} to desktop {workspace_id}");
                         current_workspace.push_window(*window);
+                        self.window_to_workspace
+                            .insert(*window, workspace_id as usize);
                     };
                 });
             }
@@ -707,6 +855,12 @@ impl<T: Layout> WindowManager<T> {
                 xcb::Event::X(x::Event::UnmapNotify(ev)) => {
                     debug!("Received UnmapNotify event for {:?}", ev.window());
                     let effects = self.handle_unmap_event(ev.window());
+                    self.x11.apply_effects_unchecked(&effects);
+                }
+
+                xcb::Event::X(x::Event::ClientMessage(ev)) => {
+                    debug!("Received ClientMessage event: {ev:?}");
+                    let effects = self.handle_client_message(&ev);
                     self.x11.apply_effects_unchecked(&effects);
                 }
 

@@ -127,6 +127,10 @@ impl Workspace {
         self.clients.iter().map(|(_key, client)| client)
     }
 
+    pub fn index_of_window(&self, window: Window) -> Option<usize> {
+        self.clients.get_index_of(&window.resource_id())
+    }
+
     pub fn swap_windows(&mut self, idx_a: usize, idx_b: usize) {
         if idx_a < self.num_of_windows() && idx_b < self.num_of_windows() {
             self.clients.swap_indices(idx_a, idx_b);
