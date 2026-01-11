@@ -20,6 +20,7 @@ pub enum Effect {
         h: u32,
     },
     Focus(Window),
+    Raise(Window),
     SetBorder {
         window: Window,
         pixel: u32,

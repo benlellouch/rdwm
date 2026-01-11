@@ -74,6 +74,7 @@ impl X11 {
             Effect::Map(window) => self.map_window_unchecked(*window),
             Effect::Unmap(window) => self.unmap_window_unchecked(*window),
             Effect::Focus(window) => self.focus_window_unchecked(*window),
+            Effect::Raise(window) => self.raise_window_unchecked(*window),
             Effect::Configure {
                 window,
                 x,
@@ -130,6 +131,7 @@ impl X11 {
             Effect::Map(window) => self.map_window_checked(*window),
             Effect::Unmap(window) => self.unmap_window_checked(*window),
             Effect::Focus(window) => self.focus_window_checked(*window),
+            Effect::Raise(window) => self.raise_window_checked(*window),
             Effect::Configure {
                 window,
                 x,
@@ -194,6 +196,14 @@ impl X11 {
             revert_to: x::InputFocus::PointerRoot,
             focus: window,
             time: x::CURRENT_TIME,
+        });
+    }
+
+    fn raise_window_unchecked(&self, window: Window) {
+        let config_values = [x::ConfigWindow::StackMode(x::StackMode::Above)];
+        self.conn.send_request(&x::ConfigureWindow {
+            window,
+            value_list: &config_values,
         });
     }
 
@@ -340,6 +350,14 @@ impl X11 {
             revert_to: x::InputFocus::PointerRoot,
             focus: window,
             time: x::CURRENT_TIME,
+        })]
+    }
+
+    fn raise_window_checked(&self, window: Window) -> Vec<VoidCookieChecked> {
+        let config_values = [x::ConfigWindow::StackMode(x::StackMode::Above)];
+        vec![self.conn.send_request_checked(&x::ConfigureWindow {
+            window,
+            value_list: &config_values,
         })]
     }
 

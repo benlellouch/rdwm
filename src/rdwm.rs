@@ -228,6 +228,24 @@ impl<T: Layout> WindowManager<T> {
     fn configure_windows(&self, workspace_id: usize) -> Vec<Effect> {
         let mut effects: Vec<Effect> = vec![];
         if let Some(current_workspace) = self.get_workspace(workspace_id) {
+            if let Some(fullscreen) = current_workspace.fullscreen_window()
+                && current_workspace.is_window_mapped(fullscreen)
+            {
+                debug!(
+                    "Fullscreen {fullscreen:?} present on workspace {workspace_id}. Overriding Layout"
+                );
+                effects.push(Effect::Configure {
+                    window: fullscreen,
+                    x: 0,
+                    y: 0,
+                    w: self.screen.width,
+                    h: self.screen.height,
+                    border: 0,
+                });
+                effects.push(Effect::Raise(fullscreen));
+                return effects;
+            }
+
             let clients: Vec<_> = current_workspace
                 .iter_clients()
                 .filter(|client| client.is_mapped())
@@ -283,13 +301,27 @@ impl<T: Layout> WindowManager<T> {
     }
 
     fn set_focus(&mut self, idx: usize) -> Vec<Effect> {
+        if let Some(fs) = self.current_workspace().fullscreen_window()
+            && self.current_workspace().is_window_mapped(fs)
+            && let Some(fs_idx) = self.current_workspace().index_of_window(fs)
+            && idx != fs_idx
+        {
+            return vec![];
+        }
+
         let mut effects = Vec::new();
+
+        let fullscreen_window = self.current_workspace().fullscreen_window();
 
         if let Some(old_window) = self.current_workspace().get_focused_window() {
             effects.push(Effect::SetBorder {
                 window: old_window,
                 pixel: self.screen.normal_border_pixel,
-                width: self.border_width,
+                width: if fullscreen_window == Some(old_window) {
+                    0
+                } else {
+                    self.border_width
+                },
             });
         }
 
@@ -299,9 +331,16 @@ impl<T: Layout> WindowManager<T> {
             effects.push(Effect::SetBorder {
                 window: new_focus_window,
                 pixel: self.screen.focused_border_pixel,
-                width: self.border_width,
+                width: if fullscreen_window == Some(new_focus_window) {
+                    0
+                } else {
+                    self.border_width
+                },
             });
             effects.push(Effect::Focus(new_focus_window));
+            if fullscreen_window == Some(new_focus_window) {
+                effects.push(Effect::Raise(new_focus_window));
+            }
         }
 
         effects.push(
@@ -309,6 +348,48 @@ impl<T: Layout> WindowManager<T> {
                 .active_window_effect(self.current_workspace().get_focused_window()),
         );
 
+        effects
+    }
+
+    fn toggle_fullscreen(&mut self) -> Vec<Effect> {
+        let Some(focused) = self.current_workspace().get_focused_window() else {
+            return vec![];
+        };
+
+        let prev_fullscreen = self.current_workspace().fullscreen_window();
+        let turning_off = prev_fullscreen == Some(focused);
+
+        if turning_off {
+            self.current_workspace_mut().set_fullscreen(None);
+        } else {
+            self.current_workspace_mut().set_fullscreen(Some(focused));
+        }
+
+        let mut effects = Vec::new();
+
+        // Clear old fullscreen state if needed.
+        if let Some(old) = prev_fullscreen
+            && (turning_off || old != focused)
+        {
+            effects.push(self.ewmh().window_fullscreen_state_effect(old, false));
+        }
+
+        // Apply state to the target window.
+        effects.push(
+            self.ewmh()
+                .window_fullscreen_state_effect(focused, !turning_off),
+        );
+
+        // Relayout and re-assert focus/border policy.
+        effects.extend(self.configure_windows(self.current_workspace));
+        if let Some(idx) = self.current_workspace().index_of_window(focused) {
+            effects.extend(self.set_focus(idx));
+        }
+        if !turning_off {
+            effects.push(Effect::Raise(focused));
+        }
+
+        effects.extend(self.ewmh_state_effects());
         effects
     }
 
@@ -554,14 +635,47 @@ impl<T: Layout> WindowManager<T> {
             "Switching from current_workspace {} to {new_workspace_id}",
             self.current_workspace
         );
-        for win in self.current_workspace().iter_windows() {
-            effects.push(Effect::Unmap(*win));
+
+        let old_workspace_id = self.current_workspace;
+        let old_windows: Vec<Window> = self
+            .workspaces
+            .get(old_workspace_id)
+            .expect("Workspace should never be out of bounds")
+            .iter_windows()
+            .copied()
+            .collect();
+
+        {
+            // WM-driven Unmap: keep internal is_mapped consistent.
+            let old_ws = self
+                .workspaces
+                .get_mut(old_workspace_id)
+                .expect("Workspace should never be out of bounds");
+            for &win in &old_windows {
+                old_ws.set_client_mapped(win, false);
+            }
+        }
+
+        for win in old_windows {
+            debug!("Unmapping {win:?}");
+            effects.push(Effect::Unmap(win));
         }
 
         self.current_workspace = new_workspace_id;
 
-        for win in self.current_workspace().iter_windows() {
-            effects.push(Effect::Map(*win));
+        let new_windows: Vec<Window> = self.current_workspace().iter_windows().copied().collect();
+
+        {
+            // WM-driven Map: keep internal is_mapped consistent.
+            let new_ws = self.current_workspace_mut();
+            for &win in &new_windows {
+                new_ws.set_client_mapped(win, true);
+            }
+        }
+
+        for win in new_windows {
+            debug!("Mapping {win:?}");
+            effects.push(Effect::Map(win));
         }
 
         effects.extend(self.configure_windows(self.current_workspace));
@@ -583,8 +697,16 @@ impl<T: Layout> WindowManager<T> {
 
         match self.current_workspace_mut().removed_focused_window() {
             Some(window_to_send) => {
+                // Fullscreen is per-workspace; moving a window clears its fullscreen state.
+                effects.push(
+                    self.ewmh()
+                        .window_fullscreen_state_effect(window_to_send, false),
+                );
                 if let Some(new_workspace) = self.workspaces.get_mut(workspace_id) {
                     new_workspace.push_window(window_to_send);
+                    // We immediately Unmap it (since it's not on the current workspace anymore).
+                    // Keep internal state consistent so layouts don't skip/phantom include it.
+                    new_workspace.set_client_mapped(window_to_send, false);
                     self.window_to_workspace
                         .insert(window_to_send, workspace_id);
                     effects.push(Effect::Unmap(window_to_send));
@@ -648,6 +770,7 @@ impl<T: Layout> WindowManager<T> {
                 }
                 ActionEvent::IncreaseWindowGap(increment) => self.increase_window_gap(*increment),
                 ActionEvent::DecreaseWindowGap(increment) => self.decrease_window_gap(*increment),
+                ActionEvent::ToggleFullscreen => self.toggle_fullscreen(),
             }
         } else {
             error!("No binding found for keycode: {keycode} with modifiers: {modifiers:?}",);
@@ -690,9 +813,20 @@ impl<T: Layout> WindowManager<T> {
             }
 
             effects.push(Effect::Map(window));
-            let idx = self.current_workspace().num_of_windows().saturating_sub(1);
-            effects.extend(self.set_focus(idx));
-            effects.extend(self.configure_windows(self.current_workspace));
+
+            if let Some(fs) = self.current_workspace().fullscreen_window()
+                && self.current_workspace().is_window_mapped(fs)
+            {
+                // Fullscreen stays focused and on top; new windows should not steal focus.
+                effects.extend(self.configure_windows(self.current_workspace));
+                if let Some(fs_idx) = self.current_workspace().index_of_window(fs) {
+                    effects.extend(self.set_focus(fs_idx));
+                }
+            } else {
+                let idx = self.current_workspace().num_of_windows().saturating_sub(1);
+                effects.extend(self.set_focus(idx));
+                effects.extend(self.configure_windows(self.current_workspace));
+            }
             effects.push(
                 self.ewmh()
                     .window_desktop_effect(window, self.current_workspace as u32),
@@ -743,11 +877,14 @@ impl<T: Layout> WindowManager<T> {
     }
 
     fn handle_unmap_event(&mut self, window: Window) -> Vec<Effect> {
+        let Some(&workspace_id) = self.window_to_workspace.get(&window) else {
+            // Likely a dock or unmanaged window.
+            return vec![];
+        };
+
         let mut changed = false;
-        {
-            if let Some(client) = self
-                .current_workspace_mut()
-                .get_client_mut(&window.resource_id())
+        if let Some(workspace) = self.workspaces.get_mut(workspace_id) {
+            if let Some(client) = workspace.get_client_mut(&window.resource_id())
                 && client.is_mapped()
             {
                 client.set_mapped(false);
@@ -755,11 +892,17 @@ impl<T: Layout> WindowManager<T> {
             }
         }
 
+        // If the window is not in the current workspace, avoid perturbing focus/layout.
+        if workspace_id != self.current_workspace {
+            return vec![];
+        }
+
         if !changed {
             return vec![];
         }
 
-        let mut effects = self.shift_focus(-1);
+        let mut effects = Vec::new();
+        effects.extend(self.shift_focus(-1));
         effects.extend(self.configure_windows(self.current_workspace));
         effects.extend(self.ewmh_state_effects());
         effects

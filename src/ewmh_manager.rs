@@ -194,4 +194,17 @@ impl<'a> EwmhManager<'a> {
         self.x11
             .get_cardinal32(self.x11.root(), self.x11.atoms().current_desktop)
     }
+
+    pub fn window_fullscreen_state_effect(&self, window: x::Window, fullscreen: bool) -> Effect {
+        let atoms = self.x11.atoms();
+        Effect::SetAtomList {
+            window,
+            atom: atoms.wm_state,
+            values: if fullscreen {
+                vec![atoms.wm_state_fullscreen.resource_id()]
+            } else {
+                vec![]
+            },
+        }
+    }
 }

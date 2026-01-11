@@ -45,6 +45,7 @@ pub static ACTION_MAPPINGS: &[ActionMapping] = &[
 
     // ==================== WINDOW MANAGEMENT ====================
     binding!(xkb::Keysym::q, [MOD], ActionEvent::Kill),
+    binding!(xkb::Keysym::f, [MOD], ActionEvent::ToggleFullscreen),
     binding!(xkb::Keysym::Left, [MOD], ActionEvent::PrevWindow),
     binding!(xkb::Keysym::Right, [MOD], ActionEvent::NextWindow),
     binding!(xkb::Keysym::Left, [MOD, SHIFT], ActionEvent::SwapLeft),

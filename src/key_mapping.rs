@@ -20,4 +20,5 @@ pub enum ActionEvent {
     SendToWorkspace(usize),
     IncreaseWindowGap(u32),
     DecreaseWindowGap(u32),
+    ToggleFullscreen,
 }

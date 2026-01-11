@@ -38,9 +38,26 @@ impl Client {
 pub struct Workspace {
     clients: IndexMap<u32, Client>,
     focus: Option<usize>,
+    fullscreen: Option<Window>,
 }
 
 impl Workspace {
+    pub const fn fullscreen_window(&self) -> Option<Window> {
+        self.fullscreen
+    }
+
+    pub fn set_fullscreen(&mut self, window: Option<Window>) {
+        self.fullscreen = window;
+        self.update_focus();
+    }
+
+    pub fn clear_fullscreen_if_matches(&mut self, window: Window) {
+        if self.fullscreen == Some(window) {
+            self.fullscreen = None;
+            self.update_focus();
+        }
+    }
+
     pub fn get_focused_window(&self) -> Option<Window> {
         self.focus
             .and_then(|i| self.clients.get_index(i))
@@ -55,6 +72,19 @@ impl Workspace {
 
     pub fn get_client_mut(&mut self, win_resource_id: &u32) -> Option<&mut Client> {
         self.clients.get_mut(win_resource_id)
+    }
+
+    pub fn set_client_mapped(&mut self, window: Window, mapped: bool) {
+        if let Some(client) = self.clients.get_mut(&window.resource_id()) {
+            client.set_mapped(mapped);
+        }
+        self.update_focus();
+    }
+
+    pub fn is_window_mapped(&self, window: Window) -> bool {
+        self.clients
+            .get(&window.resource_id())
+            .is_some_and(|c| c.is_mapped())
     }
 
     pub fn num_of_windows(&self) -> usize {
@@ -85,21 +115,38 @@ impl Workspace {
         if self.focus.is_none() {
             self.focus = Some(self.clients.len().saturating_sub(1));
         }
+
+        self.update_focus();
     }
 
     pub fn remove_window_index(&mut self, idx: usize) -> Option<Window> {
         let entry = self.clients.shift_remove_index(idx);
+        if let Some((_key, client)) = &entry {
+            self.clear_fullscreen_if_matches(client.window());
+        }
         self.update_focus();
         entry.map(|(_key, client)| client.window)
     }
 
     pub fn remove_client(&mut self, win_resource_id: &u32) -> Option<Client> {
         let client = self.clients.shift_remove(win_resource_id);
+        if let Some(c) = &client {
+            self.clear_fullscreen_if_matches(c.window());
+        }
         self.update_focus();
         client
     }
 
     fn update_focus(&mut self) {
+        if let Some(fs) = self.fullscreen {
+            if let Some(idx) = self.index_of_window(fs) {
+                self.focus = Some(idx);
+                return;
+            }
+            // Fullscreen window disappeared.
+            self.fullscreen = None;
+        }
+
         if self.clients.is_empty() {
             self.focus = None;
             return;
