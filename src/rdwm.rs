@@ -831,10 +831,7 @@ impl<T: Layout> WindowManager<T> {
 
         let mut effects = Vec::new();
 
-        match self
-            .current_workspace_mut()
-            .get_client_mut(&window.resource_id())
-        {
+        match self.current_workspace_mut().get_client_mut(window) {
             Some(client) => {
                 client.set_mapped(true);
             }
@@ -903,12 +900,10 @@ impl<T: Layout> WindowManager<T> {
     }
 
     fn handle_destroy_event_managed(&mut self, window: Window) -> Vec<Effect> {
-        let window_id = window.resource_id();
-
         if let Some(workspace_id) = self.window_to_workspace.remove(&window)
             && let Some(current_workspace) = self.workspaces.get_mut(workspace_id)
         {
-            current_workspace.remove_client(&window_id);
+            current_workspace.remove_client(window);
         }
 
         let mut effects = self.shift_focus(0);
@@ -948,7 +943,7 @@ impl<T: Layout> WindowManager<T> {
 
         let mut changed = false;
         if let Some(workspace) = self.workspaces.get_mut(workspace_id)
-            && let Some(client) = workspace.get_client_mut(&window.resource_id())
+            && let Some(client) = workspace.get_client_mut(window)
             && client.is_mapped()
         {
             client.set_mapped(false);

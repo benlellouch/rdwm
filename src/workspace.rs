@@ -1,5 +1,5 @@
 use indexmap::IndexMap;
-use xcb::{Xid, x::Window};
+use xcb::x::Window;
 
 #[derive(Debug)]
 pub struct Client {
@@ -36,7 +36,7 @@ impl Client {
 
 #[derive(Default, Debug)]
 pub struct Workspace {
-    clients: IndexMap<u32, Client>,
+    clients: IndexMap<Window, Client>,
     focus: Option<usize>,
     fullscreen: Option<Window>,
 }
@@ -70,21 +70,19 @@ impl Workspace {
             .map(|(_key, client)| client)
     }
 
-    pub fn get_client_mut(&mut self, win_resource_id: &u32) -> Option<&mut Client> {
-        self.clients.get_mut(win_resource_id)
+    pub fn get_client_mut(&mut self, window: Window) -> Option<&mut Client> {
+        self.clients.get_mut(&window)
     }
 
     pub fn set_client_mapped(&mut self, window: Window, mapped: bool) {
-        if let Some(client) = self.clients.get_mut(&window.resource_id()) {
+        if let Some(client) = self.clients.get_mut(&window) {
             client.set_mapped(mapped);
         }
         self.update_focus();
     }
 
     pub fn is_window_mapped(&self, window: Window) -> bool {
-        self.clients
-            .get(&window.resource_id())
-            .is_some_and(|c| c.is_mapped())
+        self.clients.get(&window).is_some_and(|c| c.is_mapped())
     }
 
     pub fn num_of_windows(&self) -> usize {
@@ -105,7 +103,7 @@ impl Workspace {
 
     pub fn push_window(&mut self, window: Window) {
         self.clients.insert(
-            window.resource_id(),
+            window,
             Client {
                 window,
                 size: 1,
@@ -128,8 +126,8 @@ impl Workspace {
         entry.map(|(_key, client)| client.window)
     }
 
-    pub fn remove_client(&mut self, win_resource_id: &u32) -> Option<Client> {
-        let client = self.clients.shift_remove(win_resource_id);
+    pub fn remove_client(&mut self, window: Window) -> Option<Client> {
+        let client = self.clients.shift_remove(&window);
         if let Some(c) = &client {
             self.clear_fullscreen_if_matches(c.window());
         }
@@ -175,7 +173,7 @@ impl Workspace {
     }
 
     pub fn index_of_window(&self, window: Window) -> Option<usize> {
-        self.clients.get_index_of(&window.resource_id())
+        self.clients.get_index_of(&window)
     }
 
     pub fn swap_windows(&mut self, idx_a: usize, idx_b: usize) {
