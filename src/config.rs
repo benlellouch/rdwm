@@ -1,4 +1,5 @@
 use crate::key_mapping::{ActionEvent, ActionMapping};
+use crate::layout::LayoutType;
 use std::option_env;
 use xcb::x::ModMask;
 use xkbcommon::xkb;
@@ -7,6 +8,7 @@ pub const NUM_WORKSPACES: usize = 10;
 pub const DEFAULT_BORDER_WIDTH: u32 = 1;
 pub const DEFAULT_WINDOW_GAP: u32 = 0;
 pub const DEFAULT_DOCK_HEIGHT: u32 = 30;
+pub const DEFAULT_LAYOUT: LayoutType = LayoutType::VerticalLayout;
 
 const TESTING: Option<&str> = option_env!("WM_TESTING");
 const MOD: ModMask = if TESTING.is_none() {
@@ -46,6 +48,7 @@ pub static ACTION_MAPPINGS: &[ActionMapping] = &[
     // ==================== WINDOW MANAGEMENT ====================
     binding!(xkb::Keysym::q, [MOD], ActionEvent::Kill),
     binding!(xkb::Keysym::f, [MOD], ActionEvent::ToggleFullscreen),
+    binding!(xkb::Keysym::v, [MOD], ActionEvent::CycleLayout),
     binding!(xkb::Keysym::Left, [MOD], ActionEvent::PrevWindow),
     binding!(xkb::Keysym::Right, [MOD], ActionEvent::NextWindow),
     binding!(xkb::Keysym::Left, [MOD, SHIFT], ActionEvent::SwapLeft),

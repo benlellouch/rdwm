@@ -6,7 +6,7 @@ use crate::{
     config::NUM_WORKSPACES,
     effect::Effect,
     key_mapping::ActionEvent,
-    layout::{Layout, Rect},
+    layout::{LayoutManager, Rect},
     workspace::Workspace,
     x11::WindowType,
 };
@@ -19,8 +19,8 @@ pub struct ScreenConfig {
     pub normal_border_pixel: u32,
 }
 
-pub struct WmState<L: Layout> {
-    layout: L,
+pub struct State {
+    layout_manager: LayoutManager,
 
     workspaces: [Workspace; NUM_WORKSPACES],
     window_to_workspace: HashMap<Window, usize>,
@@ -34,16 +34,10 @@ pub struct WmState<L: Layout> {
     dock_height: u32,
 }
 
-impl<L: Layout> WmState<L> {
-    pub fn new(
-        layout: L,
-        screen: ScreenConfig,
-        border_width: u32,
-        window_gap: u32,
-        dock_height: u32,
-    ) -> Self {
+impl State {
+    pub fn new(screen: ScreenConfig, border_width: u32, window_gap: u32, dock_height: u32) -> Self {
         Self {
-            layout,
+            layout_manager: LayoutManager::new(),
             workspaces: Default::default(),
             window_to_workspace: Default::default(),
             current_workspace: 0,
@@ -142,6 +136,11 @@ impl<L: Layout> WmState<L> {
         WindowType::Unmanaged
     }
 
+    fn cycle_layout(&mut self) -> Vec<Effect> {
+        self.layout_manager.cycle_layout();
+        self.configure_windows(self.current_workspace)
+    }
+
     pub fn configure_windows(&self, workspace_id: usize) -> Vec<Effect> {
         let mut effects: Vec<Effect> = vec![];
         if let Some(current_workspace) = self.get_workspace(workspace_id) {
@@ -175,9 +174,12 @@ impl<L: Layout> WmState<L> {
                 w: self.screen.width,
                 h: self.usable_screen_height(),
             };
-            let layout =
-                self.layout
-                    .generate_layout(area, &weights, self.border_width, self.window_gap);
+            let layout = self.layout_manager.get_current_layout().generate_layout(
+                area,
+                &weights,
+                self.border_width,
+                self.window_gap,
+            );
 
             effects = clients
                 .iter()
@@ -613,6 +615,7 @@ impl<L: Layout> WmState<L> {
             ActionEvent::IncreaseWindowGap(increment) => self.increase_window_gap(increment),
             ActionEvent::DecreaseWindowGap(increment) => self.decrease_window_gap(increment),
             ActionEvent::ToggleFullscreen => self.toggle_fullscreen(),
+            ActionEvent::CycleLayout => self.cycle_layout(),
             _ => vec![],
         }
     }

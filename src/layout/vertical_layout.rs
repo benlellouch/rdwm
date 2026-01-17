@@ -1,4 +1,4 @@
-use crate::layout::{Layout, Rect};
+use crate::layout::{Layout, Rect, pad};
 
 pub struct VerticalLayout;
 
@@ -12,7 +12,7 @@ impl Layout for VerticalLayout {
     ) -> Vec<Rect> {
         let total_weights: u32 = weights.iter().sum();
         let total_border = border_width + window_gap;
-        let inner_h = (area.h - 2 * total_border).max(1);
+        let inner_h = pad(area.h, total_border);
         let partitions = area.w / total_weights;
 
         let mut cumulative = 0u32;
@@ -20,7 +20,7 @@ impl Layout for VerticalLayout {
             .iter()
             .map(|weight| {
                 let cell = (area.w * weight) / total_weights;
-                let inner_w = (cell - 2 * total_border).max(1);
+                let inner_w = pad(cell, total_border);
                 let x = cumulative * partitions + window_gap;
                 cumulative += weight;
                 Rect {

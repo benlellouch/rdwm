@@ -21,4 +21,5 @@ pub enum ActionEvent {
     IncreaseWindowGap(u32),
     DecreaseWindowGap(u32),
     ToggleFullscreen,
+    CycleLayout,
 }

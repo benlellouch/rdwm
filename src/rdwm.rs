@@ -15,19 +15,18 @@ use crate::effect::Effect;
 use crate::ewmh_manager::EwmhManager;
 use crate::key_mapping::ActionEvent;
 use crate::keyboard::{fetch_keyboard_mapping, populate_key_bindings};
-use crate::layout::Layout;
-use crate::wm_state::{ScreenConfig, WmState};
+use crate::state::{ScreenConfig, State};
 use crate::x11::{WindowType, X11};
 
-pub struct WindowManager<T: Layout> {
+pub struct WindowManager {
     x11: X11,
     ewmh: EwmhManager,
     key_bindings: HashMap<(u8, ModMask), ActionEvent>,
-    state: WmState<T>,
+    state: State,
 }
 
-impl<T: Layout> WindowManager<T> {
-    pub fn new(layout: T) -> Result<Self, Box<dyn std::error::Error>> {
+impl WindowManager {
+    pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
         let (conn, _) = Connection::connect(None)?;
         info!("Connected to X.");
 
@@ -40,8 +39,7 @@ impl<T: Layout> WindowManager<T> {
         let x11 = X11::new(conn, root_window, atoms, wm_check_window);
         let ewmh = EwmhManager::new(&x11);
 
-        let state = WmState::new(
-            layout,
+        let state = State::new(
             screen,
             DEFAULT_BORDER_WIDTH,
             DEFAULT_WINDOW_GAP,
