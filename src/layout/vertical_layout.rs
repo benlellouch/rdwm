@@ -1,8 +1,8 @@
 use crate::layout::{Layout, Rect};
 
-pub struct HorizontalLayout;
+pub struct VerticalLayout;
 
-impl Layout for HorizontalLayout {
+impl Layout for VerticalLayout {
     fn generate_layout(
         &self,
         area: Rect,

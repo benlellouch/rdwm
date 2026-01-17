@@ -1,3 +1,5 @@
+pub mod vertical_layout;
+
 #[derive(Clone, Copy, Debug)]
 pub struct Rect {
     pub x: i32,

@@ -265,12 +265,12 @@ impl<L: Layout> WmState<L> {
         };
 
         let prev_fullscreen = self.current_workspace().fullscreen_window();
-        let turning_off = prev_fullscreen == Some(focused);
+        let toggle_off = prev_fullscreen == Some(focused);
 
-        if turning_off {
-            self.current_workspace_mut().set_fullscreen(None);
+        if toggle_off {
+            self.current_workspace_mut().clear_fullscreen();
         } else {
-            self.current_workspace_mut().set_fullscreen(Some(focused));
+            self.current_workspace_mut().set_fullscreen(focused);
         }
 
         let mut effects = Vec::new();
@@ -278,7 +278,7 @@ impl<L: Layout> WmState<L> {
         if let Some(idx) = self.current_workspace().index_of_window(focused) {
             effects.extend(self.set_focus(idx));
         }
-        if !turning_off {
+        if !toggle_off {
             effects.push(Effect::Raise(focused));
         }
 

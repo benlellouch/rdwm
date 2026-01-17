@@ -4,7 +4,7 @@ use xcb::x::ModMask;
 use xkbcommon::xkb;
 
 pub const NUM_WORKSPACES: usize = 10;
-pub const DEFAULT_BORDER_WIDTH: u32 = 3;
+pub const DEFAULT_BORDER_WIDTH: u32 = 1;
 pub const DEFAULT_WINDOW_GAP: u32 = 0;
 pub const DEFAULT_DOCK_HEIGHT: u32 = 30;
 

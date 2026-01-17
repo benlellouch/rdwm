@@ -9,6 +9,13 @@ pub struct Client {
 }
 
 impl Client {
+    pub fn new(window: Window) -> Self {
+        Client {
+            window,
+            size: 1,
+            is_mapped: true,
+        }
+    }
     pub const fn window(&self) -> Window {
         self.window
     }
@@ -46,16 +53,16 @@ impl Workspace {
         self.fullscreen
     }
 
-    pub fn set_fullscreen(&mut self, window: Option<Window>) {
-        self.fullscreen = window;
-        self.update_focus();
-    }
-
-    pub fn clear_fullscreen_if_matches(&mut self, window: Window) {
-        if self.fullscreen == Some(window) {
-            self.fullscreen = None;
+    pub fn set_fullscreen(&mut self, window: Window) {
+        if self.clients.contains_key(&window) {
+            self.fullscreen = Some(window);
             self.update_focus();
         }
+    }
+
+    pub fn clear_fullscreen(&mut self) {
+        self.fullscreen = None;
+        self.update_focus();
     }
 
     pub fn get_focused_window(&self) -> Option<Window> {
@@ -102,14 +109,7 @@ impl Workspace {
     }
 
     pub fn push_window(&mut self, window: Window) {
-        self.clients.insert(
-            window,
-            Client {
-                window,
-                size: 1,
-                is_mapped: true,
-            },
-        );
+        self.clients.insert(window, Client::new(window));
         if self.focus.is_none() {
             self.focus = Some(self.clients.len().saturating_sub(1));
         }
@@ -119,18 +119,12 @@ impl Workspace {
 
     pub fn remove_window_index(&mut self, idx: usize) -> Option<Window> {
         let entry = self.clients.shift_remove_index(idx);
-        if let Some((_key, client)) = &entry {
-            self.clear_fullscreen_if_matches(client.window());
-        }
         self.update_focus();
         entry.map(|(_key, client)| client.window)
     }
 
     pub fn remove_client(&mut self, window: Window) -> Option<Client> {
         let client = self.clients.shift_remove(&window);
-        if let Some(c) = &client {
-            self.clear_fullscreen_if_matches(c.window());
-        }
         self.update_focus();
         client
     }
@@ -180,5 +174,120 @@ impl Workspace {
         if idx_a < self.num_of_windows() && idx_b < self.num_of_windows() {
             self.clients.swap_indices(idx_a, idx_b);
         }
+    }
+}
+
+#[cfg(test)]
+mod client_tests {
+    use xcb::XidNew;
+
+    use super::*;
+
+    #[test]
+    fn test_weight_at_min_bound() {
+        let window = Window::new(0);
+        let mut client = Client::new(window);
+
+        client.decrease_window_size(2);
+        assert_eq!(client.size(), 1);
+    }
+
+    #[test]
+    fn test_decrease_weight() {
+        let window = Window::new(0);
+        let mut client = Client {
+            window,
+            size: 5,
+            is_mapped: true,
+        };
+
+        client.decrease_window_size(2);
+        assert_eq!(client.size(), 3);
+    }
+
+    #[test]
+    fn test_increase_weight() {
+        let window = Window::new(0);
+        let mut client = Client::new(window);
+
+        client.increase_window_size(1);
+        assert_eq!(client.size(), 2);
+    }
+}
+
+#[cfg(test)]
+mod workspace_tests {
+    use xcb::XidNew;
+
+    use super::*;
+
+    #[test]
+    fn test_fullscreen_empty_workspace() {
+        let mut workspace = Workspace::default();
+        workspace.set_fullscreen(Window::new(0));
+        assert!(workspace.fullscreen_window().is_none());
+        assert!(workspace.get_focused_window().is_none());
+    }
+
+    fn make_workspace(num_of_clients: u32) -> Workspace {
+        let mut workspace = Workspace::default();
+        for i in 0..num_of_clients {
+            let window = Window::new(i);
+            workspace.push_window(window);
+        }
+        workspace
+    }
+
+    #[test]
+    fn test_set_fullscreen_window() {
+        let mut workspace = make_workspace(5);
+        let window = Window::new(2);
+        workspace.set_fullscreen(window);
+
+        assert_eq!(workspace.fullscreen_window(), Some(window));
+        assert_eq!(workspace.get_focused_window(), Some(window));
+    }
+
+    #[test]
+    fn test_clear_fullscreen() {
+        let mut workspace = make_workspace(5);
+        let window = Window::new(2);
+        workspace.set_fullscreen(window);
+        workspace.clear_fullscreen();
+
+        assert!(workspace.fullscreen_window().is_none());
+        assert_eq!(workspace.get_focused_window(), Some(window));
+    }
+
+    #[test]
+    fn test_remove_fullscreen() {
+        let mut workspace = make_workspace(5);
+        let fullscreen_window = Window::new(2);
+        let expected_next_focus = Window::new(3);
+
+        workspace.set_fullscreen(fullscreen_window);
+        let client = workspace.remove_client(fullscreen_window);
+
+        assert!(client.is_some());
+        assert!(workspace.fullscreen_window().is_none());
+        assert_eq!(workspace.get_focused_window(), Some(expected_next_focus));
+    }
+
+    #[test]
+    fn test_remove_last_client() {
+        let mut workspace = make_workspace(1);
+        let window_to_remove = Window::new(0);
+        let client = workspace.remove_client(window_to_remove);
+
+        assert!(client.is_some());
+        assert!(workspace.get_focused_window().is_none());
+    }
+
+    #[test]
+    fn test_remove_non_managed_client() {
+        let mut workspace = make_workspace(5);
+        let window_to_remove = Window::new(6);
+        let client = workspace.remove_client(window_to_remove);
+        assert!(client.is_none());
     }
 }
