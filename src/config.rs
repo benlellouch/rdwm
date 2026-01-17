@@ -8,7 +8,7 @@ pub const NUM_WORKSPACES: usize = 10;
 pub const DEFAULT_BORDER_WIDTH: u32 = 1;
 pub const DEFAULT_WINDOW_GAP: u32 = 0;
 pub const DEFAULT_DOCK_HEIGHT: u32 = 30;
-pub const DEFAULT_LAYOUT: LayoutType = LayoutType::VerticalLayout;
+pub const DEFAULT_LAYOUT: LayoutType = LayoutType::HorizontalLayout;
 
 const TESTING: Option<&str> = option_env!("WM_TESTING");
 const MOD: ModMask = if TESTING.is_none() {

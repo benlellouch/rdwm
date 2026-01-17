@@ -3,11 +3,11 @@ use log::{debug, error};
 
 use crate::{
     config::DEFAULT_LAYOUT,
-    layout::{master_layout::MasterLayout, vertical_layout::VerticalLayout},
+    layout::{master_layout::MasterLayout, horizontal_layout::HorizontalLayout},
 };
 
 pub mod master_layout;
-pub mod vertical_layout;
+pub mod horizontal_layout;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Rect {
@@ -43,7 +43,7 @@ macro_rules! define_layouts {
 }
 
 define_layouts! {
-    VerticalLayout => VerticalLayout,
+    HorizontalLayout => HorizontalLayout,
     MasterLayout => MasterLayout,
 }
 
