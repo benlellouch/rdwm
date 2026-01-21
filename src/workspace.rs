@@ -184,13 +184,25 @@ impl Workspace {
         self.clients.get_index(index).map(|(window, _)| *window)
     }
 
-    pub fn next_window(&self, direction: isize) -> Option<Window> {
+    fn next_index(index: isize, direction: isize, length: isize) -> usize {
+        (index + direction).rem_euclid(length) as usize
+    }
+
+    pub fn next_mapped_window(&self, direction: isize) -> Option<Window> {
         if let Some(window) = self.focus
             && let Some(index) = self.index_of_window(&window)
         {
-            let next_index =
-                ((index as isize) + direction).rem_euclid(self.clients.len() as isize) as usize;
-            return self.get_window_at_index(next_index);
+            let mut next_index =
+                Self::next_index(index as isize, direction, self.clients.len() as isize);
+            while next_index != index {
+                if let Some((next_window, next_client)) = self.clients.get_index(next_index)
+                    && next_client.is_mapped()
+                {
+                    return Some(*next_window);
+                }
+                next_index =
+                    Self::next_index(next_index as isize, direction, self.clients.len() as isize);
+            }
         }
         None
     }
@@ -338,5 +350,52 @@ mod workspace_tests {
         workspace.set_focus(Window::new(4));
         workspace.removed_focused_window();
         assert_eq!(workspace.get_focus_window(), Some(Window::new(3)));
+    }
+
+    #[test]
+    fn test_push_window_sets_focus_when_none() {
+        let mut workspace = Workspace::default();
+        let window = Window::new(10);
+
+        workspace.push_window(window);
+
+        assert_eq!(workspace.get_focus_window(), Some(window));
+    }
+
+    #[test]
+    fn test_set_focus_rejects_invalid_or_unmapped() {
+        let mut workspace = Workspace::default();
+        let window_a = Window::new(1);
+        let window_b = Window::new(2);
+
+        workspace.push_window(window_a);
+        workspace.push_window(window_b);
+
+        workspace.set_client_mapped(&window_b, false);
+
+        assert!(!workspace.set_focus(Window::new(99)));
+        assert!(!workspace.set_focus(window_b));
+        assert_eq!(workspace.get_focus_window(), Some(window_a));
+    }
+
+    #[test]
+    fn test_next_window_wraps() {
+        let workspace = make_workspace(3);
+
+        assert_eq!(workspace.get_focus_window(), Some(Window::new(0)));
+        assert_eq!(workspace.next_mapped_window(1), Some(Window::new(1)));
+        assert_eq!(workspace.next_mapped_window(-1), Some(Window::new(2)));
+    }
+
+    #[test]
+    fn test_swap_windows_changes_order() {
+        let mut workspace = make_workspace(3);
+        let window_a = Window::new(0);
+        let window_b = Window::new(2);
+
+        workspace.swap_windows(&window_a, &window_b);
+
+        let windows: Vec<Window> = workspace.iter_windows().copied().collect();
+        assert_eq!(windows, vec![window_b, Window::new(1), window_a]);
     }
 }

@@ -359,7 +359,7 @@ impl State {
 
     pub fn send_to_workspace(&mut self, workspace_id: usize) -> Vec<Effect> {
         let mut effects = Vec::new();
-        if workspace_id >= NUM_WORKSPACES {
+        if workspace_id >= NUM_WORKSPACES || workspace_id == self.current_workspace_id() {
             return effects;
         }
 
@@ -423,7 +423,7 @@ impl State {
     }
 
     pub fn shift_focus(&mut self, direction: isize) -> Vec<Effect> {
-        let Some(next_focus) = self.current_workspace().next_window(direction) else {
+        let Some(next_focus) = self.current_workspace().next_mapped_window(direction) else {
             warn!("Failed to retrieve next focus");
             return vec![];
         };
@@ -433,7 +433,7 @@ impl State {
 
     pub fn swap_window(&mut self, direction: isize) -> Vec<Effect> {
         let current_workspace = self.current_workspace_mut();
-        let Some(next_window) = current_workspace.next_window(direction) else {
+        let Some(next_window) = current_workspace.next_mapped_window(direction) else {
             return vec![];
         };
 
