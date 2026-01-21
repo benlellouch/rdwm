@@ -3,11 +3,32 @@ use log::{debug, error};
 
 use crate::{
     config::DEFAULT_LAYOUT,
-    layout::{master_layout::MasterLayout, horizontal_layout::HorizontalLayout},
+    layout::{horizontal_layout::HorizontalLayout, master_layout::MasterLayout},
 };
 
-pub mod master_layout;
 pub mod horizontal_layout;
+pub mod master_layout;
+
+macro_rules! define_layouts {
+    ( $( $variant:ident => $ty:path ),+ $(,)? ) => {
+        #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
+        pub enum LayoutType {
+            $( $variant ),+
+        }
+
+        fn build_layout_map() -> IndexMap<LayoutType, Box<dyn Layout>> {
+            let mut map: IndexMap<LayoutType, Box<dyn Layout>> = IndexMap::default();
+            $( map.insert(LayoutType::$variant, Box::new($ty)); )+
+            map
+        }
+    };
+}
+
+// DEFINE LAYOUTS HERE
+define_layouts! {
+    HorizontalLayout => HorizontalLayout,
+    MasterLayout => MasterLayout,
+}
 
 #[derive(Clone, Copy, Debug)]
 pub struct Rect {
@@ -25,26 +46,6 @@ pub trait Layout {
         border_width: u32,
         window_gap: u32,
     ) -> Vec<Rect>;
-}
-
-macro_rules! define_layouts {
-    ( $( $variant:ident => $ty:path ),+ $(,)? ) => {
-        #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
-        pub enum LayoutType {
-            $( $variant ),+
-        }
-
-        fn build_layout_map() -> IndexMap<LayoutType, Box<dyn Layout>> {
-            let mut map: IndexMap<LayoutType, Box<dyn Layout>> = IndexMap::default();
-            $( map.insert(LayoutType::$variant, Box::new($ty)); )+
-            map
-        }
-    };
-}
-
-define_layouts! {
-    HorizontalLayout => HorizontalLayout,
-    MasterLayout => MasterLayout,
 }
 
 pub(super) fn pad(dim: u32, border: u32) -> u32 {

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use log::warn;
 use xcb::{Xid, x::Window};
 
 use crate::{
@@ -58,7 +59,7 @@ impl State {
     }
 
     pub fn focused_window(&self) -> Option<Window> {
-        self.current_workspace().get_focused_window()
+        self.current_workspace().get_focus_window()
     }
 
     pub fn usable_screen_height(&self) -> u32 {
@@ -75,7 +76,7 @@ impl State {
     pub fn is_window_fullscreen(&self, window: Window) -> bool {
         self.workspaces
             .iter()
-            .any(|ws| ws.fullscreen_window() == Some(window))
+            .any(|ws| ws.get_fullscreen_window() == Some(window))
     }
 
     pub fn managed_windows_sorted(&self) -> Vec<Window> {
@@ -144,8 +145,8 @@ impl State {
     pub fn configure_windows(&self, workspace_id: usize) -> Vec<Effect> {
         let mut effects: Vec<Effect> = vec![];
         if let Some(current_workspace) = self.get_workspace(workspace_id) {
-            if let Some(fullscreen) = current_workspace.fullscreen_window()
-                && current_workspace.is_window_mapped(fullscreen)
+            if let Some(fullscreen) = current_workspace.get_fullscreen_window()
+                && current_workspace.is_window_mapped(&fullscreen)
             {
                 effects.push(Effect::Configure {
                     window: fullscreen,
@@ -215,20 +216,19 @@ impl State {
         effects
     }
 
-    pub fn set_focus(&mut self, idx: usize) -> Vec<Effect> {
-        if let Some(fs) = self.current_workspace().fullscreen_window()
-            && self.current_workspace().is_window_mapped(fs)
-            && let Some(fs_idx) = self.current_workspace().index_of_window(fs)
-            && idx != fs_idx
+    pub fn set_focus(&mut self, window: Window) -> Vec<Effect> {
+        if let Some(fs) = self.current_workspace().get_fullscreen_window()
+            && self.current_workspace().is_window_mapped(&fs)
+            && fs == window
         {
             return vec![];
         }
 
         let mut effects = Vec::new();
 
-        let fullscreen_window = self.current_workspace().fullscreen_window();
+        let fullscreen_window = self.current_workspace().get_fullscreen_window();
 
-        if let Some(old_window) = self.current_workspace().get_focused_window() {
+        if let Some(old_window) = self.current_workspace().get_focus_window() {
             effects.push(Effect::SetBorder {
                 window: old_window,
                 pixel: self.screen.normal_border_pixel,
@@ -240,33 +240,30 @@ impl State {
             });
         }
 
-        self.current_workspace_mut().set_focus(idx);
+        self.current_workspace_mut().set_focus(window);
 
-        if let Some(new_focus_window) = self.current_workspace().get_focused_window() {
-            effects.push(Effect::SetBorder {
-                window: new_focus_window,
-                pixel: self.screen.focused_border_pixel,
-                width: if fullscreen_window == Some(new_focus_window) {
-                    0
-                } else {
-                    self.border_width
-                },
-            });
-            effects.push(Effect::Focus(new_focus_window));
-            if fullscreen_window == Some(new_focus_window) {
-                effects.push(Effect::Raise(new_focus_window));
-            }
+        effects.push(Effect::SetBorder {
+            window,
+            pixel: self.screen.focused_border_pixel,
+            width: if fullscreen_window == Some(window) {
+                0
+            } else {
+                self.border_width
+            },
+        });
+        effects.push(Effect::Focus(window));
+        if fullscreen_window == Some(window) {
+            effects.push(Effect::Raise(window));
         }
-
         effects
     }
 
     pub fn toggle_fullscreen(&mut self) -> Vec<Effect> {
-        let Some(focused) = self.current_workspace().get_focused_window() else {
+        let Some(focused) = self.current_workspace().get_focus_window() else {
             return vec![];
         };
 
-        let prev_fullscreen = self.current_workspace().fullscreen_window();
+        let prev_fullscreen = self.current_workspace().get_fullscreen_window();
         let toggle_off = prev_fullscreen == Some(focused);
 
         if toggle_off {
@@ -277,9 +274,7 @@ impl State {
 
         let mut effects = Vec::new();
         effects.extend(self.configure_windows(self.current_workspace));
-        if let Some(idx) = self.current_workspace().index_of_window(focused) {
-            effects.extend(self.set_focus(idx));
-        }
+        effects.extend(self.set_focus(focused));
         if !toggle_off {
             effects.push(Effect::Raise(focused));
         }
@@ -304,9 +299,7 @@ impl State {
             effects.extend(self.go_to_workspace(workspace_id));
         }
 
-        if let Some(idx) = self.current_workspace().index_of_window(window) {
-            effects.extend(self.set_focus(idx));
-        }
+        effects.extend(self.set_focus(window));
 
         effects
     }
@@ -333,7 +326,7 @@ impl State {
                 .get_mut(old_workspace_id)
                 .expect("Workspace should never be out of bounds");
             for &win in &old_windows {
-                old_ws.set_client_mapped(win, false);
+                old_ws.set_client_mapped(&win, false);
             }
         }
 
@@ -347,7 +340,7 @@ impl State {
 
         {
             let new_ws = self.current_workspace_mut();
-            for &win in &new_windows {
+            for win in &new_windows {
                 new_ws.set_client_mapped(win, true);
             }
         }
@@ -357,7 +350,7 @@ impl State {
         }
 
         effects.extend(self.configure_windows(self.current_workspace));
-        if let Some(focus) = self.current_workspace().get_focus() {
+        if let Some(focus) = self.current_workspace().get_focus_window() {
             effects.extend(self.set_focus(focus));
         }
 
@@ -366,35 +359,30 @@ impl State {
 
     pub fn send_to_workspace(&mut self, workspace_id: usize) -> Vec<Effect> {
         let mut effects = Vec::new();
-        if workspace_id >= NUM_WORKSPACES {
+        if workspace_id >= NUM_WORKSPACES || workspace_id == self.current_workspace_id() {
             return effects;
         }
 
-        match self.current_workspace_mut().removed_focused_window() {
-            Some(window_to_send) => {
-                if let Some(new_workspace) = self.workspaces.get_mut(workspace_id) {
-                    new_workspace.push_window(window_to_send);
-                    new_workspace.set_client_mapped(window_to_send, false);
-                    self.window_to_workspace
-                        .insert(window_to_send, workspace_id);
+        if let Some(window_to_send) = self.current_workspace_mut().removed_focused_window()
+            && let Some(new_workspace) = self.workspaces.get_mut(workspace_id)
+        {
+            new_workspace.push_window(window_to_send);
+            new_workspace.set_client_mapped(&window_to_send, false);
+            self.window_to_workspace
+                .insert(window_to_send, workspace_id);
 
-                    effects.push(Effect::Unmap(window_to_send));
-                    effects.push(Effect::SetBorder {
-                        window: window_to_send,
-                        pixel: self.screen.normal_border_pixel,
-                        width: self.border_width,
-                    });
+            effects.push(Effect::Unmap(window_to_send));
+            effects.push(Effect::SetBorder {
+                window: window_to_send,
+                pixel: self.screen.normal_border_pixel,
+                width: self.border_width,
+            });
 
-                    effects.extend(self.configure_windows(self.current_workspace));
-                    effects.extend(self.configure_windows(workspace_id));
+            effects.extend(self.configure_windows(self.current_workspace));
+            effects.extend(self.configure_windows(workspace_id));
 
-                    if let Some(focus) = self.current_workspace().get_focus() {
-                        effects.extend(self.set_focus(focus));
-                    }
-                }
-            }
-            None => {
-                // No focused window.
+            if let Some(focus) = self.current_workspace().get_focus_window() {
+                effects.extend(self.set_focus(focus));
             }
         }
 
@@ -434,20 +422,9 @@ impl State {
         self.configure_windows(self.current_workspace)
     }
 
-    fn next_window_index(&mut self, direction: isize) -> Option<usize> {
-        let curr_workspace = self.current_workspace_mut();
-        let window_count: isize = curr_workspace.num_of_windows() as isize;
-
-        if window_count == 0 {
-            return None;
-        }
-
-        let curr = curr_workspace.get_focus().unwrap_or(0) as isize;
-        Some(((curr + direction).rem_euclid(window_count)) as usize)
-    }
-
     pub fn shift_focus(&mut self, direction: isize) -> Vec<Effect> {
-        let Some(next_focus) = self.next_window_index(direction) else {
+        let Some(next_focus) = self.current_workspace().next_mapped_window(direction) else {
+            warn!("Failed to retrieve next focus");
             return vec![];
         };
 
@@ -455,20 +432,18 @@ impl State {
     }
 
     pub fn swap_window(&mut self, direction: isize) -> Vec<Effect> {
-        let Some(next_window) = self.next_window_index(direction) else {
+        let current_workspace = self.current_workspace_mut();
+        let Some(next_window) = current_workspace.next_mapped_window(direction) else {
             return vec![];
         };
 
-        let Some(focus) = self.current_workspace().get_focus() else {
+        let Some(focus) = current_workspace.get_focus_window() else {
             return vec![];
         };
 
-        {
-            let curr_workspace = self.current_workspace_mut();
-            curr_workspace.swap_windows(focus, next_window);
-        }
+        current_workspace.swap_windows(&focus, &next_window);
 
-        let mut effects = self.set_focus(next_window);
+        let mut effects = vec![];
         effects.extend(self.configure_windows(self.current_workspace));
         effects
     }
@@ -501,7 +476,7 @@ impl State {
     fn handle_map_request_managed(&mut self, window: Window) -> Vec<Effect> {
         let mut effects = Vec::new();
 
-        match self.current_workspace_mut().get_client_mut(window) {
+        match self.current_workspace_mut().get_client_mut(&window) {
             Some(client) => {
                 client.set_mapped(true);
             }
@@ -514,16 +489,13 @@ impl State {
 
         effects.push(Effect::Map(window));
 
-        if let Some(fs) = self.current_workspace().fullscreen_window()
-            && self.current_workspace().is_window_mapped(fs)
+        if let Some(fs) = self.current_workspace().get_fullscreen_window()
+            && self.current_workspace().is_window_mapped(&fs)
         {
             effects.extend(self.configure_windows(self.current_workspace));
-            if let Some(fs_idx) = self.current_workspace().index_of_window(fs) {
-                effects.extend(self.set_focus(fs_idx));
-            }
+            effects.extend(self.set_focus(fs));
         } else {
-            let idx = self.current_workspace().num_of_windows().saturating_sub(1);
-            effects.extend(self.set_focus(idx));
+            effects.extend(self.set_focus(window));
             effects.extend(self.configure_windows(self.current_workspace));
         }
 
@@ -560,7 +532,7 @@ impl State {
 
         let mut effects = Vec::new();
         effects.extend(self.configure_windows(self.current_workspace));
-        if let Some(focus) = self.current_workspace().get_focus() {
+        if let Some(focus) = self.current_workspace().get_focus_window() {
             effects.extend(self.set_focus(focus));
         }
         effects
@@ -581,10 +553,10 @@ impl State {
 
         let mut changed = false;
         if let Some(workspace) = self.workspaces.get_mut(workspace_id)
-            && let Some(client) = workspace.get_client_mut(window)
+            && let Some(client) = workspace.get_client_mut(&window)
             && client.is_mapped()
         {
-            client.set_mapped(false);
+            workspace.set_client_mapped(&window, false);
             changed = true;
         }
 
@@ -597,7 +569,6 @@ impl State {
         }
 
         let mut effects = Vec::new();
-        effects.extend(self.shift_focus(-1));
         effects.extend(self.configure_windows(self.current_workspace));
         effects
     }

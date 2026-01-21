@@ -1,6 +1,6 @@
 use xcb::x::{self, ModMask, Window};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Effect {
     Map(Window),
     Unmap(Window),

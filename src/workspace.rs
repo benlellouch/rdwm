@@ -16,11 +16,11 @@ impl Client {
             is_mapped: true,
         }
     }
-    pub const fn window(&self) -> Window {
+    pub fn window(&self) -> Window {
         self.window
     }
 
-    pub const fn size(&self) -> u32 {
+    pub fn size(&self) -> u32 {
         self.size
     }
 
@@ -32,11 +32,11 @@ impl Client {
         self.size = self.size.saturating_sub(decrement).max(1);
     }
 
-    pub const fn is_mapped(&self) -> bool {
+    pub fn is_mapped(&self) -> bool {
         self.is_mapped
     }
 
-    pub const fn set_mapped(&mut self, mapped: bool) {
+    pub fn set_mapped(&mut self, mapped: bool) {
         self.is_mapped = mapped;
     }
 }
@@ -44,12 +44,15 @@ impl Client {
 #[derive(Default, Debug)]
 pub struct Workspace {
     clients: IndexMap<Window, Client>,
-    focus: Option<usize>,
+    focus: Option<Window>,
     fullscreen: Option<Window>,
 }
 
 impl Workspace {
-    pub const fn fullscreen_window(&self) -> Option<Window> {
+    fn number_of_clients(&self) -> usize {
+        self.clients.len()
+    }
+    pub fn get_fullscreen_window(&self) -> Option<Window> {
         self.fullscreen
     }
 
@@ -62,80 +65,70 @@ impl Workspace {
 
     pub fn clear_fullscreen(&mut self) {
         self.fullscreen = None;
-        self.update_focus();
+        self.update_focus()
     }
 
-    pub fn get_focused_window(&self) -> Option<Window> {
+    pub fn get_focus_window(&self) -> Option<Window> {
         self.focus
-            .and_then(|i| self.clients.get_index(i))
-            .map(|(_key, client)| client.window())
     }
 
     pub fn get_focused_client_mut(&mut self) -> Option<&mut Client> {
-        self.focus
-            .and_then(|i| self.clients.get_index_mut(i))
-            .map(|(_key, client)| client)
+        self.focus.and_then(|win| self.clients.get_mut(&win))
     }
 
-    pub fn get_client_mut(&mut self, window: Window) -> Option<&mut Client> {
-        self.clients.get_mut(&window)
+    pub fn get_client_mut(&mut self, window: &Window) -> Option<&mut Client> {
+        self.clients.get_mut(window)
     }
 
-    pub fn set_client_mapped(&mut self, window: Window, mapped: bool) {
-        if let Some(client) = self.clients.get_mut(&window) {
+    pub fn set_client_mapped(&mut self, window: &Window, mapped: bool) {
+        if let Some(client) = self.clients.get_mut(window) {
             client.set_mapped(mapped);
         }
         self.update_focus();
     }
 
-    pub fn is_window_mapped(&self, window: Window) -> bool {
-        self.clients.get(&window).is_some_and(|c| c.is_mapped())
+    pub fn is_window_mapped(&self, window: &Window) -> bool {
+        self.clients.get(window).is_some_and(|c| c.is_mapped())
     }
 
-    pub fn num_of_windows(&self) -> usize {
-        self.clients.len()
-    }
-
-    pub fn set_focus(&mut self, idx: usize) -> bool {
-        if idx >= self.clients.len() {
-            return false;
+    pub fn set_focus(&mut self, window: Window) -> bool {
+        if self.clients.contains_key(&window) && self.is_window_mapped(&window) {
+            self.focus = Some(window);
+            return true;
         }
-        self.focus = Some(idx);
-        true
-    }
-
-    pub const fn get_focus(&self) -> Option<usize> {
-        self.focus
+        false
     }
 
     pub fn push_window(&mut self, window: Window) {
         self.clients.insert(window, Client::new(window));
         if self.focus.is_none() {
-            self.focus = Some(self.clients.len().saturating_sub(1));
+            self.set_focus(window);
         }
-
         self.update_focus();
-    }
-
-    pub fn remove_window_index(&mut self, idx: usize) -> Option<Window> {
-        let entry = self.clients.shift_remove_index(idx);
-        self.update_focus();
-        entry.map(|(_key, client)| client.window)
     }
 
     pub fn remove_client(&mut self, window: Window) -> Option<Client> {
+        let idx_to_remove = self.index_of_window(&window);
         let client = self.clients.shift_remove(&window);
-        self.update_focus();
+        if let Some(index) = idx_to_remove {
+            let new_index = if index < self.number_of_clients() {
+                index
+            } else {
+                self.number_of_clients().saturating_sub(1)
+            };
+            if let Some(window) = self.get_window_at_index(new_index) {
+                self.update_focus_if_invalid(window);
+            } else {
+                self.update_focus();
+            }
+        }
         client
     }
 
     fn update_focus(&mut self) {
-        if let Some(fs) = self.fullscreen {
-            if let Some(idx) = self.index_of_window(fs) {
-                self.focus = Some(idx);
-                return;
-            }
-            // Fullscreen window disappeared.
+        if let Some(fs) = self.fullscreen
+            && !self.set_focus(fs)
+        {
             self.fullscreen = None;
         }
 
@@ -144,34 +137,80 @@ impl Workspace {
             return;
         }
 
-        match self.focus {
-            Some(f) if f < self.clients.len() => {}
-            _ => self.focus = Some(self.clients.len().saturating_sub(1)),
+        if !self.is_focus_valid() {
+            let new_focus = self
+                .iter_clients()
+                .find(|client| client.is_mapped())
+                .map(|client| client.window());
+            self.focus = new_focus;
         }
     }
 
+    fn update_focus_if_invalid(&mut self, candidate_window: Window) {
+        if !self.is_focus_valid() {
+            self.set_focus(candidate_window);
+        }
+
+        self.update_focus();
+    }
+
+    fn is_focus_valid(&self) -> bool {
+        self.focus
+            .map(|win| self.clients.contains_key(&win))
+            .unwrap_or(true)
+    }
+
     pub fn removed_focused_window(&mut self) -> Option<Window> {
-        if let Some(idx) = self.focus {
-            self.remove_window_index(idx)
+        if let Some(window) = self.focus {
+            self.remove_client(window).map(|client| client.window())
         } else {
             None
         }
     }
 
     pub fn iter_windows(&self) -> impl Iterator<Item = &Window> {
-        self.clients.iter().map(|(_key, client)| &client.window)
+        self.clients.keys()
     }
 
     pub fn iter_clients(&self) -> impl Iterator<Item = &Client> {
-        self.clients.iter().map(|(_key, client)| client)
+        self.clients.values()
     }
 
-    pub fn index_of_window(&self, window: Window) -> Option<usize> {
-        self.clients.get_index_of(&window)
+    pub fn index_of_window(&self, window: &Window) -> Option<usize> {
+        self.clients.get_index_of(window)
     }
 
-    pub fn swap_windows(&mut self, idx_a: usize, idx_b: usize) {
-        if idx_a < self.num_of_windows() && idx_b < self.num_of_windows() {
+    fn get_window_at_index(&self, index: usize) -> Option<Window> {
+        self.clients.get_index(index).map(|(window, _)| *window)
+    }
+
+    fn next_index(index: isize, direction: isize, length: isize) -> usize {
+        (index + direction).rem_euclid(length) as usize
+    }
+
+    pub fn next_mapped_window(&self, direction: isize) -> Option<Window> {
+        if let Some(window) = self.focus
+            && let Some(index) = self.index_of_window(&window)
+        {
+            let mut next_index =
+                Self::next_index(index as isize, direction, self.clients.len() as isize);
+            while next_index != index {
+                if let Some((next_window, next_client)) = self.clients.get_index(next_index)
+                    && next_client.is_mapped()
+                {
+                    return Some(*next_window);
+                }
+                next_index =
+                    Self::next_index(next_index as isize, direction, self.clients.len() as isize);
+            }
+        }
+        None
+    }
+
+    pub fn swap_windows(&mut self, window_a: &Window, window_b: &Window) {
+        if let Some(idx_a) = self.index_of_window(window_a)
+            && let Some(idx_b) = self.index_of_window(window_b)
+        {
             self.clients.swap_indices(idx_a, idx_b);
         }
     }
@@ -225,8 +264,8 @@ mod workspace_tests {
     fn test_fullscreen_empty_workspace() {
         let mut workspace = Workspace::default();
         workspace.set_fullscreen(Window::new(0));
-        assert!(workspace.fullscreen_window().is_none());
-        assert!(workspace.get_focused_window().is_none());
+        assert!(workspace.get_fullscreen_window().is_none());
+        assert!(workspace.get_focus_window().is_none());
     }
 
     fn make_workspace(num_of_clients: u32) -> Workspace {
@@ -244,8 +283,8 @@ mod workspace_tests {
         let window = Window::new(2);
         workspace.set_fullscreen(window);
 
-        assert_eq!(workspace.fullscreen_window(), Some(window));
-        assert_eq!(workspace.get_focused_window(), Some(window));
+        assert_eq!(workspace.get_fullscreen_window(), Some(window));
+        assert_eq!(workspace.get_focus_window(), Some(window));
     }
 
     #[test]
@@ -255,8 +294,8 @@ mod workspace_tests {
         workspace.set_fullscreen(window);
         workspace.clear_fullscreen();
 
-        assert!(workspace.fullscreen_window().is_none());
-        assert_eq!(workspace.get_focused_window(), Some(window));
+        assert!(workspace.get_fullscreen_window().is_none());
+        assert_eq!(workspace.get_focus_window(), Some(window));
     }
 
     #[test]
@@ -269,18 +308,18 @@ mod workspace_tests {
         let client = workspace.remove_client(fullscreen_window);
 
         assert!(client.is_some());
-        assert!(workspace.fullscreen_window().is_none());
-        assert_eq!(workspace.get_focused_window(), Some(expected_next_focus));
+        assert!(workspace.get_fullscreen_window().is_none());
+        assert_eq!(workspace.get_focus_window(), Some(expected_next_focus));
     }
 
     #[test]
-    fn test_remove_last_client() {
+    fn test_remove_only_client() {
         let mut workspace = make_workspace(1);
         let window_to_remove = Window::new(0);
         let client = workspace.remove_client(window_to_remove);
 
         assert!(client.is_some());
-        assert!(workspace.get_focused_window().is_none());
+        assert!(workspace.get_focus_window().is_none());
     }
 
     #[test]
@@ -289,5 +328,74 @@ mod workspace_tests {
         let window_to_remove = Window::new(6);
         let client = workspace.remove_client(window_to_remove);
         assert!(client.is_none());
+    }
+
+    #[test]
+    fn test_remove_first_client() {
+        let mut workspace = make_workspace(5);
+        assert_eq!(
+            workspace.get_focus_window(),
+            workspace.get_window_at_index(0)
+        );
+        workspace.removed_focused_window();
+        assert_eq!(
+            workspace.get_focus_window(),
+            workspace.get_window_at_index(0)
+        )
+    }
+
+    #[test]
+    fn test_remove_last_client() {
+        let mut workspace = make_workspace(5);
+        workspace.set_focus(Window::new(4));
+        workspace.removed_focused_window();
+        assert_eq!(workspace.get_focus_window(), Some(Window::new(3)));
+    }
+
+    #[test]
+    fn test_push_window_sets_focus_when_none() {
+        let mut workspace = Workspace::default();
+        let window = Window::new(10);
+
+        workspace.push_window(window);
+
+        assert_eq!(workspace.get_focus_window(), Some(window));
+    }
+
+    #[test]
+    fn test_set_focus_rejects_invalid_or_unmapped() {
+        let mut workspace = Workspace::default();
+        let window_a = Window::new(1);
+        let window_b = Window::new(2);
+
+        workspace.push_window(window_a);
+        workspace.push_window(window_b);
+
+        workspace.set_client_mapped(&window_b, false);
+
+        assert!(!workspace.set_focus(Window::new(99)));
+        assert!(!workspace.set_focus(window_b));
+        assert_eq!(workspace.get_focus_window(), Some(window_a));
+    }
+
+    #[test]
+    fn test_next_window_wraps() {
+        let workspace = make_workspace(3);
+
+        assert_eq!(workspace.get_focus_window(), Some(Window::new(0)));
+        assert_eq!(workspace.next_mapped_window(1), Some(Window::new(1)));
+        assert_eq!(workspace.next_mapped_window(-1), Some(Window::new(2)));
+    }
+
+    #[test]
+    fn test_swap_windows_changes_order() {
+        let mut workspace = make_workspace(3);
+        let window_a = Window::new(0);
+        let window_b = Window::new(2);
+
+        workspace.swap_windows(&window_a, &window_b);
+
+        let windows: Vec<Window> = workspace.iter_windows().copied().collect();
+        assert_eq!(windows, vec![window_b, Window::new(1), window_a]);
     }
 }
