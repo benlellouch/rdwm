@@ -74,9 +74,8 @@ impl State {
     }
 
     pub fn is_window_fullscreen(&self, window: Window) -> bool {
-        self.window_to_workspace
-            .get(&window)
-            .and_then(|workspace_id| self.get_workspace(*workspace_id))
+        self.window_workspace(window)
+            .and_then(|workspace_id| self.get_workspace(workspace_id))
             .and_then(|workspace| workspace.get_fullscreen_window())
             .map(|fullscreen| window == fullscreen)
             .unwrap_or(false)
@@ -132,7 +131,7 @@ impl State {
             return WindowType::Dock;
         }
 
-        if self.window_to_workspace.contains_key(&window) {
+        if self.window_workspace(window).is_some() {
             return WindowType::Managed;
         }
 
@@ -284,11 +283,7 @@ impl State {
     pub fn focus_window(&mut self, window: Window, desktop_hint: Option<usize>) -> Vec<Effect> {
         let mut effects = Vec::new();
 
-        let workspace_id = self
-            .window_to_workspace
-            .get(&window)
-            .copied()
-            .or(desktop_hint);
+        let workspace_id = self.window_workspace(window).or(desktop_hint);
 
         if self.current_workspace().get_fullscreen_window().is_some() {
             return effects;
@@ -382,7 +377,6 @@ impl State {
             });
 
             effects.extend(self.configure_windows(self.current_workspace));
-            effects.extend(self.configure_windows(workspace_id));
 
             if let Some(focus) = self.current_workspace().get_focus_window() {
                 effects.extend(self.set_focus(focus));
@@ -549,7 +543,7 @@ impl State {
     }
 
     fn handle_unmap_event_managed(&mut self, window: Window) -> Vec<Effect> {
-        let Some(&workspace_id) = self.window_to_workspace.get(&window) else {
+        let Some(workspace_id) = self.window_workspace(window) else {
             return vec![];
         };
 
@@ -648,6 +642,10 @@ mod state_tests {
             let workspace_id: usize = (i as usize) / NUM_WORKSPACES;
             let window = Window::new(i);
             state.track_startup_managed(window, workspace_id);
+            if workspace_id > 0 {
+                let workspace = state.get_workspace_mut(workspace_id).unwrap();
+                workspace.set_client_mapped(&window, false);
+            }
         }
 
         state
@@ -746,6 +744,92 @@ mod state_tests {
                 .collect::<Vec<&Effect>>()
                 .len(),
             9
+        )
+    }
+
+    #[test]
+    fn test_toggle_fullscreen_and_send_to_workspace() {
+        let mut state = make_state(10);
+        let window_to_fullsreen = Window::new(6);
+        let expected_focus = Window::new(7);
+        let _ = state.set_focus(window_to_fullsreen);
+        let _fullscreen_effects = state.toggle_fullscreen();
+        let workspace_effects = state.send_to_workspace(1);
+
+        assert!(!state.is_window_fullscreen(window_to_fullsreen));
+        assert_eq!(state.window_workspace(window_to_fullsreen).unwrap(), 1);
+        assert!(
+            state
+                .get_workspace(0)
+                .unwrap()
+                .index_of_window(&window_to_fullsreen)
+                .is_none()
+        );
+        assert!(workspace_effects.contains(&Effect::Unmap(window_to_fullsreen)));
+        assert!(workspace_effects.contains(&Effect::Focus(expected_focus)));
+        assert_eq!(
+            workspace_effects
+                .iter()
+                .filter(|effect| matches!(
+                    effect,
+                    Effect::Configure {
+                        window: _,
+                        x: _,
+                        y: _,
+                        w: _,
+                        h: _,
+                        border: _
+                    }
+                ))
+                .collect::<Vec<&Effect>>()
+                .len(),
+            9
+        )
+    }
+
+    #[test]
+    fn test_toggle_fullscreen_and_go_to_workspace() {
+        let mut state = make_state(10);
+        let window_to_fullsreen = Window::new(6);
+        let _ = state.set_focus(window_to_fullsreen);
+        let _fullscreen_effects = state.toggle_fullscreen();
+        let workspace_effects = state.go_to_workspace(1);
+
+        assert!(!state.is_window_fullscreen(window_to_fullsreen));
+        assert_eq!(state.current_workspace_id(), 1);
+        assert_eq!(
+            workspace_effects
+                .iter()
+                .filter(|effect| matches!(
+                    effect,
+                    Effect::Configure {
+                        window: _,
+                        x: _,
+                        y: _,
+                        w: _,
+                        h: _,
+                        border: _
+                    }
+                ))
+                .collect::<Vec<&Effect>>()
+                .len(),
+            10
+        );
+        assert_eq!(
+            workspace_effects
+                .iter()
+                .filter(|effect| matches!(effect, Effect::Unmap(_)))
+                .collect::<Vec<&Effect>>()
+                .len(),
+            10
+        );
+        assert_eq!(
+            workspace_effects
+                .iter()
+                .filter(|effect| matches!(effect, Effect::Map(_)))
+                .collect::<Vec<&Effect>>()
+                .len(),
+            10
         )
     }
 }
