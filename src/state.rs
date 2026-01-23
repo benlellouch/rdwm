@@ -221,7 +221,6 @@ impl State {
     pub fn set_focus(&mut self, window: Window) -> Vec<Effect> {
         if let Some(fs) = self.current_workspace().get_fullscreen_window()
             && self.current_workspace().is_window_mapped(&fs)
-            && fs == window
         {
             return vec![];
         }
@@ -229,33 +228,33 @@ impl State {
         let mut effects = Vec::new();
 
         let fullscreen_window = self.current_workspace().get_fullscreen_window();
+        let previous_focus = self.current_workspace().get_focus_window();
+        if self.current_workspace_mut().set_focus(window) {
+            if let Some(previous_window) = previous_focus {
+                effects.push(Effect::SetBorder {
+                    window: previous_window,
+                    pixel: self.screen.normal_border_pixel,
+                    width: if fullscreen_window == Some(previous_window) {
+                        0
+                    } else {
+                        self.border_width
+                    },
+                });
+            }
 
-        if let Some(old_window) = self.current_workspace().get_focus_window() {
             effects.push(Effect::SetBorder {
-                window: old_window,
-                pixel: self.screen.normal_border_pixel,
-                width: if fullscreen_window == Some(old_window) {
+                window,
+                pixel: self.screen.focused_border_pixel,
+                width: if fullscreen_window == Some(window) {
                     0
                 } else {
                     self.border_width
                 },
             });
-        }
-
-        self.current_workspace_mut().set_focus(window);
-
-        effects.push(Effect::SetBorder {
-            window,
-            pixel: self.screen.focused_border_pixel,
-            width: if fullscreen_window == Some(window) {
-                0
-            } else {
-                self.border_width
-            },
-        });
-        effects.push(Effect::Focus(window));
-        if fullscreen_window == Some(window) {
-            effects.push(Effect::Raise(window));
+            effects.push(Effect::Focus(window));
+            if fullscreen_window == Some(window) {
+                effects.push(Effect::Raise(window));
+            }
         }
         effects
     }
@@ -268,19 +267,17 @@ impl State {
         let prev_fullscreen = self.current_workspace().get_fullscreen_window();
         let toggle_off = prev_fullscreen == Some(focused);
 
+        let mut effects = Vec::new();
+
         if toggle_off {
             self.current_workspace_mut().clear_fullscreen();
         } else {
             self.current_workspace_mut().set_fullscreen(focused);
-        }
-
-        let mut effects = Vec::new();
-        effects.extend(self.configure_windows(self.current_workspace));
-        effects.extend(self.set_focus(focused));
-        if !toggle_off {
             effects.push(Effect::Raise(focused));
         }
 
+        effects.extend(self.configure_windows(self.current_workspace));
+        effects.extend(self.set_focus(focused));
         effects
     }
 
@@ -292,6 +289,10 @@ impl State {
             .get(&window)
             .copied()
             .or(desktop_hint);
+
+        if self.current_workspace().get_fullscreen_window().is_some() {
+            return effects;
+        } //We don't want our focus to be stolen if we are fullscreen
 
         let Some(workspace_id) = workspace_id else {
             return effects;
@@ -495,7 +496,6 @@ impl State {
             && self.current_workspace().is_window_mapped(&fs)
         {
             effects.extend(self.configure_windows(self.current_workspace));
-            effects.extend(self.set_focus(fs));
         } else {
             effects.extend(self.set_focus(window));
             effects.extend(self.configure_windows(self.current_workspace));
@@ -630,6 +630,8 @@ impl State {
 #[cfg(test)]
 mod state_tests {
 
+    use std::any::{Any, TypeId};
+
     use xcb::XidNew;
 
     use super::*;
@@ -641,7 +643,7 @@ mod state_tests {
             focused_border_pixel: 0,
             normal_border_pixel: 1,
         };
-        let mut state = State::new(screen, 1, 1, 25);
+        let mut state = State::new(screen, 1, 0, 25);
         for i in 0..(num_of_clients_per_workspace * NUM_WORKSPACES as u32) {
             let workspace_id: usize = (i as usize) / NUM_WORKSPACES;
             let window = Window::new(i);
@@ -656,12 +658,8 @@ mod state_tests {
         let mut state = make_state(10);
         let window_to_focus = Window::new(6);
         let effects = state.set_focus(window_to_focus);
-        println!("{effects:?}");
 
-        assert_eq!(
-            state.current_workspace().get_focus_window().unwrap(),
-            window_to_focus
-        );
+        assert_eq!(state.focused_window().unwrap(), window_to_focus);
         assert!(effects.contains(&Effect::SetBorder {
             window: Window::new(0),
             pixel: state.screen.normal_border_pixel,
@@ -673,5 +671,81 @@ mod state_tests {
             width: state.border_width
         }));
         assert!(effects.contains(&Effect::Focus(window_to_focus)));
+    }
+
+    #[test]
+    fn test_toggle_fullscreen() {
+        let mut state = make_state(10);
+        let window_to_fullsreen = Window::new(6);
+        let _ = state.set_focus(window_to_fullsreen);
+        let mut fullscreen_effects = state.toggle_fullscreen();
+
+        // Test that we succesfully toggled window to fullscreen
+        assert_eq!(state.focused_window().unwrap(), window_to_fullsreen);
+        assert_eq!(
+            state.current_workspace().get_fullscreen_window().unwrap(),
+            window_to_fullsreen
+        );
+        assert!(state.is_window_fullscreen(window_to_fullsreen));
+        assert!(fullscreen_effects.contains(&Effect::Raise(window_to_fullsreen)));
+        assert!(fullscreen_effects.contains(&Effect::Configure {
+            window: window_to_fullsreen,
+            x: 0,
+            y: 0,
+            w: 800,
+            h: 600,
+            border: 0
+        }));
+
+        fullscreen_effects = state.toggle_fullscreen();
+
+        assert_eq!(state.focused_window().unwrap(), window_to_fullsreen);
+        assert_eq!(state.current_workspace().get_fullscreen_window(), None);
+        assert!(!state.is_window_fullscreen(window_to_fullsreen));
+        assert!(fullscreen_effects.contains(&Effect::Focus(window_to_fullsreen)))
+    }
+
+    #[test]
+    fn test_toggle_fullscreen_and_switch_focus() {
+        let mut state = make_state(10);
+        let window_to_fullsreen = Window::new(6);
+        let window_to_focus = Window::new(2);
+        let _ = state.set_focus(window_to_fullsreen);
+        let _fullscreen_effects = state.toggle_fullscreen();
+        let focus_effects = state.set_focus(window_to_focus);
+        // We assert that our focus has not been stolen
+        assert!(focus_effects.is_empty());
+    }
+
+    #[test]
+    fn test_toggle_fullscreen_and_kill_window() {
+        let mut state = make_state(10);
+        let window_to_fullsreen = Window::new(6);
+        let expected_focus = Window::new(7);
+        let _ = state.set_focus(window_to_fullsreen);
+        let _fullscreen_effects = state.toggle_fullscreen();
+        let destroy_effects = state.on_destroy(window_to_fullsreen);
+
+        assert!(!state.is_window_fullscreen(window_to_fullsreen));
+        assert_eq!(state.focused_window().unwrap(), expected_focus);
+        assert!(destroy_effects.contains(&Effect::Focus(expected_focus)));
+        assert_eq!(
+            destroy_effects
+                .iter()
+                .filter(|effect| matches!(
+                    effect,
+                    Effect::Configure {
+                        window: _,
+                        x: _,
+                        y: _,
+                        w: _,
+                        h: _,
+                        border: _
+                    }
+                ))
+                .collect::<Vec<&Effect>>()
+                .len(),
+            9
+        )
     }
 }
