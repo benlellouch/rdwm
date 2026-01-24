@@ -260,14 +260,6 @@ mod workspace_tests {
 
     use super::*;
 
-    #[test]
-    fn test_fullscreen_empty_workspace() {
-        let mut workspace = Workspace::default();
-        workspace.set_fullscreen(Window::new(0));
-        assert!(workspace.get_fullscreen_window().is_none());
-        assert!(workspace.get_focus_window().is_none());
-    }
-
     fn make_workspace(num_of_clients: u32) -> Workspace {
         let mut workspace = Workspace::default();
         for i in 0..num_of_clients {
@@ -275,6 +267,14 @@ mod workspace_tests {
             workspace.push_window(window);
         }
         workspace
+    }
+
+    #[test]
+    fn test_fullscreen_empty_workspace() {
+        let mut workspace = Workspace::default();
+        workspace.set_fullscreen(Window::new(0));
+        assert!(workspace.get_fullscreen_window().is_none());
+        assert!(workspace.get_focus_window().is_none());
     }
 
     #[test]
